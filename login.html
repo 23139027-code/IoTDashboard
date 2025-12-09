@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Home - Đăng nhập</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #f0f2f5;
+            margin: 0;
+        }
+        .auth-container {
+            background: white;
+            padding: 2rem;
+            border-radius: 10px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            width: 350px;
+            text-align: center;
+        }
+        h2 { margin-bottom: 1.5rem; color: #333; }
+        input {
+            width: 100%;
+            padding: 12px;
+            margin: 8px 0;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            box-sizing: border-box; /* Đảm bảo padding không làm vỡ layout */
+        }
+        button {
+            width: 100%;
+            padding: 12px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        button:hover { background-color: #0056b3; }
+        .toggle-text {
+            margin-top: 15px;
+            font-size: 14px;
+            color: #666;
+        }
+        .toggle-text a {
+            color: #007bff;
+            text-decoration: none;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        #error-message {
+            color: red;
+            font-size: 14px;
+            margin-bottom: 10px;
+            display: none;
+        }
+        /* Thêm vào thẻ <style> của login.html */
+
+        /* Style cho lớp nền mờ */
+        .modal {
+            display: none; 
+            position: fixed; 
+            z-index: 1000; 
+            left: 0; top: 0; 
+            width: 100%; height: 100%; 
+            background-color: rgba(0,0,0,0.6); /* Màu đen mờ */
+            backdrop-filter: blur(2px);
+        }
+
+        /* Style cho hộp nội dung */
+        .modal-content {
+            background-color: #fefefe;
+            margin: 5% auto; /* Cách trên 5%, căn giữa */
+            padding: 30px;
+            border: 1px solid #888;
+            width: 90%; 
+            border-radius: 10px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+            position: relative;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        /* Nút đóng X */
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        .close:hover { color: black; }
+
+        /* Input field cho đẹp */
+        .input-field {
+            width: 100%;
+            padding: 8px;
+            margin-top: 5px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="auth-container">
+        <h2 id="form-title">Đăng Nhập</h2>
+        
+        <div id="error-message"></div>
+
+        <form id="auth-form">
+            <input type="email" id="email" placeholder="Email" required>
+            <input type="password" id="password" placeholder="Mật khẩu" required>
+            <input type="password" id="confirm-password" placeholder="Nhập lại mật khẩu" style="display: none;">
+            <button type="submit" id="submit-btn">Đăng Nhập</button>
+        </form>
+
+        <p class="toggle-text">
+            <span id="toggle-msg">Chưa có tài khoản?</span>
+            <a id="toggle-btn">Đăng ký ngay</a>
+            <div style="margin-top: 15px; font-size: 14px; color: #666;">
+                <span>Key bị lỗi? </span>
+                <a href="#" id="open-config-btn" style="color: #007bff; text-decoration: none; cursor: pointer; font-weight: bold;">
+                    Cấu hình Firebase Key
+                </a>
+            </div>
+        </p>
+    </div>
+
+</form>
+
+        <div id="config-modal" class="modal" style="display: none;">
+            <div class="modal-content" style="max-width: 600px;">
+                <span class="close" id="close-config-btn">&times;</span>
+                <h2 style="text-align: center; margin-bottom: 20px;">Cấu Hình Firebase</h2>
+                
+                <form id="firebase-setup-form">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; text-align: left;">
+                        <div>
+                            <label>API Key:</label>
+                            <input type="text" id="cfg-apiKey" required class="input-field">
+                        </div>
+                        <div>
+                            <label>Auth Domain:</label>
+                            <input type="text" id="cfg-authDomain" required class="input-field">
+                        </div>
+                        <div>
+                            <label>Database URL:</label>
+                            <input type="text" id="cfg-databaseURL" required class="input-field">
+                        </div>
+                        <div>
+                            <label>Project ID:</label>
+                            <input type="text" id="cfg-projectId" required class="input-field">
+                        </div>
+                        <div>
+                            <label>Storage Bucket:</label>
+                            <input type="text" id="cfg-storageBucket" class="input-field">
+                        </div>
+                        <div>
+                            <label>Messaging Sender ID:</label>
+                            <input type="text" id="cfg-messagingSenderId" class="input-field">
+                        </div>
+                        <div>
+                            <label>App ID:</label>
+                            <input type="text" id="cfg-appId" required class="input-field">
+                        </div>
+                        <div>
+                            <label>Measurement ID:</label>
+                            <input type="text" id="cfg-measurementId" class="input-field">
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 25px; display: flex; gap: 10px;">
+                        <button type="submit" class="btn-save" style="flex: 1; background: #2563eb; color: white; padding: 10px; border: none; border-radius: 4px; cursor: pointer;">Lưu & Tải Lại</button>
+                        <button type="button" id="btn-reset-config" style="flex: 1; background: #ef4444; color: white; padding: 10px; border: none; border-radius: 4px; cursor: pointer;">Dùng Mặc Định</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+    <script type="module" src="login-login.js"></script>
+    <script type="module">
+    // Import nếu cần thiết, hoặc viết code JS thuần như sau:
+
+    const modal = document.getElementById("config-modal");
+    const btnOpen = document.getElementById("open-config-btn");
+    const btnClose = document.getElementById("close-config-btn");
+    const btnReset = document.getElementById("btn-reset-config");
+    const form = document.getElementById("firebase-setup-form");
+
+    // 1. Mở Modal
+    btnOpen.onclick = function(e) {
+        e.preventDefault(); // Chặn load lại trang khi bấm link
+        modal.style.display = "block";
+        loadSettings(); // Tự điền dữ liệu cũ nếu có
+    }
+
+    // 2. Đóng Modal
+    btnClose.onclick = function() {
+        modal.style.display = "none";
+    }
+
+    // Bấm ra ngoài vùng trắng cũng đóng
+    window.onclick = function(event) {
+        if (event.target == modal) {
+            modal.style.display = "none";
+        }
+    }
+
+    // 3. Hàm Load dữ liệu cũ từ LocalStorage lên Form
+    function loadSettings() {
+        const savedString = localStorage.getItem('user_firebase_config');
+        if (savedString) {
+            try {
+                const config = JSON.parse(savedString);
+                document.getElementById('cfg-apiKey').value = config.apiKey || '';
+                document.getElementById('cfg-authDomain').value = config.authDomain || '';
+                document.getElementById('cfg-databaseURL').value = config.databaseURL || '';
+                document.getElementById('cfg-projectId').value = config.projectId || '';
+                document.getElementById('cfg-storageBucket').value = config.storageBucket || '';
+                document.getElementById('cfg-messagingSenderId').value = config.messagingSenderId || '';
+                document.getElementById('cfg-appId').value = config.appId || '';
+                document.getElementById('cfg-measurementId').value = config.measurementId || '';
+            } catch(e) {}
+        }
+    }
+
+    // 4. Xử lý LƯU CẤU HÌNH
+    form.onsubmit = function(event) {
+        event.preventDefault();
+
+        const config = {
+            apiKey: document.getElementById('cfg-apiKey').value.trim(),
+            authDomain: document.getElementById('cfg-authDomain').value.trim(),
+            databaseURL: document.getElementById('cfg-databaseURL').value.trim(),
+            projectId: document.getElementById('cfg-projectId').value.trim(),
+            storageBucket: document.getElementById('cfg-storageBucket').value.trim(),
+            messagingSenderId: document.getElementById('cfg-messagingSenderId').value.trim(),
+            appId: document.getElementById('cfg-appId').value.trim(),
+            measurementId: document.getElementById('cfg-measurementId').value.trim()
+        };
+
+        // Validate cơ bản
+        if (!config.apiKey.startsWith("AIza")) {
+            alert("API Key không hợp lệ (Phải bắt đầu bằng 'AIza')");
+            return;
+        }
+
+        // Lưu vào LocalStorage
+        localStorage.setItem('user_firebase_config', JSON.stringify(config));
+        
+        alert("Đã lưu cấu hình mới! Trang sẽ tải lại.");
+        location.reload(); // Reload để file firebase-config.js đọc Key mới
+    };
+
+    // 5. Xử lý RESET về mặc định
+    btnReset.onclick = function() {
+        if(confirm("Xóa cấu hình riêng và quay về mặc định?")) {
+            localStorage.removeItem('user_firebase_config');
+            location.reload();
+        }
+    }
+</script>
+
+</body>
+</html>
