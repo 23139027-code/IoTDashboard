@@ -1,12 +1,18 @@
 Báo cáo lỗi — Kiểm tra tệp nguồn (100% tĩnh)
-Ngày tạo: 2025-12-15 (cập nhật mới nhất: 2025-12-15 17:50)
+Ngày tạo: 2025-12-15 (cập nhật mới nhất: 2025-12-15 19:15)
 Nhánh hiện tại: test
+
+KẾT QUẢ KIỂM TRA MỚI NHẤT (2025-12-15 19:15 - Branch: test):
+✅ Không phát hiện lỗi nghiêm trọng mới
+✅ Các vấn đề đã sửa: firebase-config.js (khởi tạo an toàn), script.js (DOM injection, MQTT check)
+⚠️ Vấn đề còn tồn tại: login.html (thẻ </form> thừa), login-login.js (case trùng lặp)
 
 Tóm tắt:
 - Tổng số tệp kiểm tra: 7 (tệp chính trong thư mục gốc)
-- Vấn đề nghiêm trọng còn tồn: 1 (thẻ `</form>` thừa trong `login.html` — chưa sửa theo yêu cầu)
-- Vấn đề trung bình/nhỏ (nên sửa): 6
-- Gợi ý bảo mật & cải thiện: nhiều mục (xem chi tiết từng file)
+- Vấn đề nghiêm trọng còn tồn: 1 (thẻ `</form>` thừa trong `login.html`)
+- Vấn đề trung bình/nhỏ: 3 (không ảnh hưởng nghiêm trọng)
+- Lỗi cú pháp: Không phát hiện
+- Thêm tính năng mới: WiFi status badge, nút "Làm mới" dữ liệu
 
 Tệp đã kiểm tra: `index.html`, `login.html`, `auth.js`, `firebase-config.js`, `login-login.js`, `script.js`, `style.css`.
 
@@ -272,6 +278,59 @@ Gợi ý hành động tiếp theo (tôi có thể làm giúp):
 7) Thay tất cả `window.onclick =` bằng `window.addEventListener('click', ...)` (một số đã sửa trong `script.js`, `login.html` vẫn còn `window.onclick`).
 
 Đã áp dụng (NHÁNH TEST): sửa `firebase-config.js`, `script.js` (renderGrid, renderReportList, event handling), và `style.css` (.report-card, .report-grid) như mô tả ở trên.
+
+========================================
+CẬP NHẬT: 2025-12-15 19:15 - KIỂM TRA TOÀN BỘ LẠI (NHÁNH TEST)
+========================================
+
+Kết quả quét toàn bộ các file:
+
+1. **LỖI NGHIÊM TRỌNG MỚI PHÁT HIỆN - script.js:**
+
+   Vị trí: Hàm `setupModal()` (khoảng dòng 343-380) và `setupEditModal()` (khoảng dòng 267)
+   
+   Vấn đề:
+   - Hàm `setupModal()` không kiểm tra null trước khi sử dụng modal element:
+     ```javascript
+     function setupModal() {
+         const modal = document.getElementById('add-modal');
+         // THIẾU: if (!modal) return;
+         modal.style.display = 'none';  // <-- Có thể crash nếu modal không tồn tại
+         ...
+     }
+     ```
+   
+   - Hàm `setupEditModal()` có vấn đề tương tự với editModal
+   
+   Tác động:
+   - Nếu element #add-modal hoặc #edit-modal không tồn tại trong DOM, toàn bộ script.js sẽ bị crash với TypeError
+   - Toàn bộ ứng dụng sẽ không hoạt động do script dừng giữa chừng
+   - Đây là lỗi CRITICAL vì setupModal() được gọi khi khởi tạo
+   
+   Khuyến nghị:
+   - Thêm kiểm tra null ngay sau khi query element:
+     ```javascript
+     function setupModal() {
+         const modal = document.getElementById('add-modal');
+         if (!modal) return;  // <-- Thêm dòng này
+         modal.style.display = 'none';
+         ...
+     }
+     ```
+   - Làm tương tự cho setupEditModal()
+
+2. **Các lỗi cũ vẫn còn (độ ưu tiên trung bình):**
+   - login.html: Thẻ </form> thừa
+   - login-login.js: Duplicate case 'auth/user-not-found' trong switch statement
+
+3. **Điểm tích cực:**
+   - Các sửa lỗi trước đã được áp dụng tốt (renderGrid, firebase-config validation, MQTT checks)
+   - Đa số code đã có null checks đầy đủ (grep tìm được 11 instances kiểm tra null)
+   - Tính năng WiFi status và nút Làm Mới hoạt động tốt
+
+Hành động cần làm ngay:
+- FIX LỖI CRITICAL: Thêm null check vào setupModal() và setupEditModal()
+- (Optional) Sửa các lỗi cũ trong login.html và login-login.js
 
 --- Kết thúc báo cáo ---
 
