@@ -185,6 +185,36 @@ Chi tiết theo tệp (tiếng Việt):
     + Performance tốt hơn vì không render chart mỗi lần toggle
     + Dữ liệu chart chính xác hơn, chỉ phản ánh thay đổi sensor
 
+- CẬP NHẬT 2025-12-15 18:43-18:46 (NHÁNH TEST): Sửa lỗi dữ liệu Lux/Light không hiển thị  
+  - Vấn đề: Web không lấy được dữ liệu lux/light từ Firebase, hiển thị "-- Lux" thay vì giá trị thực
+  - Phương án debug: Thêm console.log để kiểm tra cấu trúc dữ liệu Firebase
+  - Kết quả debug: User xác nhận Firebase sử dụng field name `lux` chứ không phải `light`
+    ```
+    Firebase structure:
+    {
+      temp: 31,
+      humid: 58,
+      lux: 1578  ← Đúng field name
+    }
+    ```
+  - Nguyên nhân: Code đang đọc `data.light` và `device.light` nhưng Firebase lưu là `data.lux` và `device.lux`
+  - Thay đổi chi tiết: Thay TẤT CẢ 12 chỗ sử dụng `.light` thành `.lux`:
+    1. `renderGrid()`: `device.light` → `device.lux` (dòng 203)
+    2. `renderReportList()`: `device.light` → `device.lux` (dòng 593)
+    3. `showChart()` - history loading: `val.light` → `val.lux` (dòng 686)
+    4. `showChart()` - realtime update: `data.light` → `data.lux` (dòng 729)
+    5. `showChart()` - sensor change check: `data.light` → `data.lux` (dòng 741)
+    6. `showChart()` - validation: `data.light !== undefined` → `data.lux !== undefined` (dòng 743)
+    7. `showChart()` - lastSensorData update: `light: data.light` → `light: data.lux` (dòng 745)
+    8. `showChart()` - chart data push: `data.light` → `data.lux` (dòng 755)
+    9. `fetchAllHistoryData()` - history reading: `light: val.light` → `light: val.lux` (dòng 944)
+    10. `fetchAllHistoryData()` - table display: `row.light` → `row.lux` (dòng 972)
+  - Lợi ích:
+    + Dữ liệu lux/ánh sáng hiển thị đúng trên card (cả Quản lý và Dashboard)
+    + Biểu đồ cập nhật đúng dữ liệu lux
+    + Bảng xuất dữ liệu hiển thị đúng
+    + Đồng bộ hoàn toàn với Firebase schema
+
 Khuyến nghị bảo mật & tĩnh tổng quát:
 - Không chèn trực tiếp dữ liệu bên ngoài vào `innerHTML`.
 - Dùng `addEventListener` để đăng ký sự kiện global thay vì gán thuộc tính `window.onclick`.

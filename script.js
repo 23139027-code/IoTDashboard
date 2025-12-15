@@ -145,6 +145,7 @@ function renderGrid(data) {
         const device = data[deviceId];
         if (!device || !device.name) return;
 
+
         const card = document.createElement('div');
         card.className = 'card';
 
@@ -196,7 +197,7 @@ function renderGrid(data) {
 
         metrics.appendChild(makeMetric('NHIỆT ĐỘ', (device.temp !== undefined ? device.temp : '--') + '°C'));
         metrics.appendChild(makeMetric('ĐỘ ẨM', (device.humid !== undefined ? device.humid : '--') + '%'));
-        metrics.appendChild(makeMetric('ÁNH SÁNG', (device.light !== undefined ? device.light : '--') + ' Lux'));
+        metrics.appendChild(makeMetric('ÁNH SÁNG', (device.lux !== undefined ? device.lux : '--') + ' Lux'));
 
         // Actions
         const actions = document.createElement('div');
@@ -586,7 +587,7 @@ async function renderReportList() {
 
                 metrics.appendChild(makeMetric('NHIỆT ĐỘ', (device.temp !== undefined ? device.temp : '--') + '°C'));
                 metrics.appendChild(makeMetric('ĐỘ ẨM', (device.humid !== undefined ? device.humid : '--') + '%'));
-                metrics.appendChild(makeMetric('ÁNH SÁNG', (device.light !== undefined ? device.light : '--') + ' Lux'));
+                metrics.appendChild(makeMetric('ÁNH SÁNG', (device.lux !== undefined ? device.lux : '--') + ' Lux'));
 
                 // Actions
                 const actions = document.createElement('div');
@@ -679,7 +680,7 @@ async function showChart(deviceId, deviceName) {
                 cachedHistoryData.labels.push(timeStr);
                 cachedHistoryData.temps.push(val.temp);
                 cachedHistoryData.humids.push(val.humid);
-                cachedHistoryData.lights.push(val.light);
+                cachedHistoryData.lights.push(val.lux);
             });
         }
     } catch (e) {
@@ -697,7 +698,6 @@ async function showChart(deviceId, deviceName) {
         const data = snapshot.val();
         if (!data) return;
 
-        // --- A. Cập nhật giao diện 3 ô (Code cũ của bạn) ---
         // Nguồn
         const elPower = document.getElementById('detail-power-status');
         const elBoxPower = document.getElementById('stat-power-box');
@@ -713,7 +713,7 @@ async function showChart(deviceId, deviceName) {
         // 3 thông số
         if (document.getElementById('detail-temp')) document.getElementById('detail-temp').innerText = (data.temp || '--') + ' °C';
         if (document.getElementById('detail-humid')) document.getElementById('detail-humid').innerText = (data.humid || '--') + ' %';
-        if (document.getElementById('detail-light')) document.getElementById('detail-light').innerText = (data.light || '--') + ' Lux';
+        if (document.getElementById('detail-light')) document.getElementById('detail-light').innerText = (data.lux || '--') + ' Lux';
 
         // Switch
         if (document.getElementById('toggle-fan')) document.getElementById('toggle-fan').checked = (data.fan_active === true);
@@ -725,11 +725,11 @@ async function showChart(deviceId, deviceName) {
         const sensorChanged =
             lastSensorData.temp !== data.temp ||
             lastSensorData.humid !== data.humid ||
-            lastSensorData.light !== data.light;
+            lastSensorData.light !== data.lux;
 
-        if (sensorChanged && data.temp !== undefined && data.humid !== undefined && data.light !== undefined) {
+        if (sensorChanged && data.temp !== undefined && data.humid !== undefined && data.lux !== undefined) {
             // Update last known sensor values
-            lastSensorData = { temp: data.temp, humid: data.humid, light: data.light };
+            lastSensorData = { temp: data.temp, humid: data.humid, light: data.lux };
 
             // Lấy giờ hiện tại
             const now = new Date();
@@ -739,7 +739,7 @@ async function showChart(deviceId, deviceName) {
             cachedHistoryData.labels.push(timeLabel);
             cachedHistoryData.temps.push(data.temp || 0);
             cachedHistoryData.humids.push(data.humid || 0);
-            cachedHistoryData.lights.push(data.light || 0);
+            cachedHistoryData.lights.push(data.lux || 0);
 
             // Cắt bớt nếu dài quá (giữ 20 điểm)
             if (cachedHistoryData.labels.length > 20) {
@@ -928,7 +928,7 @@ window.fetchAllHistoryData = async function () {
                         time: val.last_update, // Giả sử bạn lưu time dạng timestamp hoặc ISO string
                         temp: val.temp,
                         humid: val.humid,
-                        light: val.light
+                        light: val.lux
                     });
                 });
             }
@@ -956,7 +956,7 @@ window.fetchAllHistoryData = async function () {
                 <td>${timeStr}</td>
                 <td>${row.temp} °C</td>
                 <td>${row.humid} %</td>
-                <td>${row.light} Lux</td>
+                <td>${row.lux} Lux</td>
             `;
             tbody.appendChild(tr);
         });
