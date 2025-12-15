@@ -596,7 +596,7 @@ async function renderReportList() {
                 btnEdit.className = 'btn-sm';
                 btnEdit.textContent = 'Sửa';
                 btnEdit.addEventListener('click', () => {
-                    window.triggerEdit(deviceId, device.name, device.interval || 30);
+                    showChart(deviceId, device.name);
                 });
 
                 const btnPower = document.createElement('button');

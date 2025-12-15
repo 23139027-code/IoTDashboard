@@ -98,10 +98,24 @@ Chi tiết theo tệp (tiếng Việt):
     });
     ```
   - Lợi ích:
-    + Nút "Sửa" giờ mở modal sửa đúng như mong đợi
     + Nút "Tắt/Bật" thay đổi trạng thái thiết bị mà không mở chart
     + Click vào bất kỳ vùng nào khác của card sẽ mở chart
     + Logic rõ ràng và dễ debug hơn (kiểm tra target thay vì dựa vào event bubbling)
+
+- CẬP NHẬT 2025-12-15 17:58 (NHÁNH TEST): Thay đổi hành vi nút "Sửa" trong Dashboard (Report)
+  - Yêu cầu: Nút "Sửa" trong Dashboard (Report) cũng mở chart thay vì mở modal sửa
+  - Thay đổi: Thay đổi event handler của nút "Sửa" từ `window.triggerEdit(...)` sang `showChart(...)`
+  - Lý do: Trong Dashboard (Report), người dùng muốn xem chi tiết chart khi nhấn vào nút "Sửa", khác với phần Quản lý (nơi nút "Sửa" vẫn mở modal sửa)
+  - Code:
+    ```javascript
+    btnEdit.addEventListener('click', () => {
+        showChart(deviceId, device.name);
+    });
+    ```
+  - Lợi ích:
+    + Cả nút "Sửa" và click vào card đều mở chart
+    + Chỉ có nút "Tắt/Bật" thay đổi trạng thái thiết bị
+    + UX phù hợp với mục đích xem báo cáo/dashboard
 
 Khuyến nghị bảo mật & tĩnh tổng quát:
 - Không chèn trực tiếp dữ liệu bên ngoài vào `innerHTML`.
