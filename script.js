@@ -98,10 +98,22 @@ function connectMQTT() {
 }
 
 function sendCommand(deviceId, cmd, val = "") {
-    if (!mqttClient || !mqttClient.isConnected()) {
+    // Kiểm tra an toàn: nhiều phiên bản Paho có isConnected() như hàm, hoặc có cờ .connected
+    let connected = false;
+    try {
+        if (!mqttClient) connected = false;
+        else if (typeof mqttClient.isConnected === 'function') connected = mqttClient.isConnected();
+        else if (typeof mqttClient.isConnected !== 'function' && mqttClient.isConnected !== undefined) connected = !!mqttClient.isConnected;
+        else if (mqttClient.connected !== undefined) connected = !!mqttClient.connected;
+    } catch (e) {
+        connected = false;
+    }
+
+    if (!connected) {
         alert("Chưa kết nối MQTT!");
         return;
     }
+
     const topic = `DATALOGGER/${deviceId}/CMD`;
     const payload = JSON.stringify({ cmd: cmd, val: val });
     const message = new Paho.MQTT.Message(payload);
@@ -131,59 +143,85 @@ function renderGrid(data) {
 
     Object.keys(data).forEach(deviceId => {
         const device = data[deviceId];
-        if (!device.name) return;
-        
+        if (!device || !device.name) return;
+
         const card = document.createElement('div');
         card.className = 'card';
-        
-        // 1. Xác định trạng thái
-        const isActive = device.active; // true hoặc false
-        const statusColor = isActive ? '#10b981' : '#9ca3af'; // Xanh hoặc Xám
-        
-        // Luôn hiện "Đang đo" nếu active = true, ngược lại là "Đã tắt"
-        const statusText = isActive 
-            ? `Đang đo (${device.interval || 30}s)` 
-            : 'Đã tắt';
 
-        // 2. KHAI BÁO BIẾN CHO NÚT NGUỒN (Đây là phần bạn bị thiếu)
-        const powerIcon = isActive ? '<i class="fa-solid fa-power-off"></i> Tắt' : '<i class="fa-solid fa-play"></i> Bật';
-        const powerClass = isActive ? 'btn-warning' : 'btn-success'; 
+        // Header
+        const header = document.createElement('div');
+        header.className = 'card-header';
+        const headerLeft = document.createElement('div');
+        const titleDiv = document.createElement('div');
+        titleDiv.className = 'card-title';
+        titleDiv.textContent = device.name;
+        const idSpan = document.createElement('span');
+        idSpan.className = 'device-id';
+        idSpan.textContent = deviceId;
+        headerLeft.appendChild(titleDiv);
+        headerLeft.appendChild(idSpan);
+        const chipIcon = document.createElement('i');
+        chipIcon.className = 'fa-solid fa-microchip';
+        chipIcon.style.color = '#6b7280';
+        header.appendChild(headerLeft);
+        header.appendChild(chipIcon);
 
-        // 3. Render HTML
-        card.innerHTML = `
-            <div class="card-header">
-                <div>
-                    <div class="card-title">${device.name}</div>
-                    <span class="device-id">${deviceId}</span>
-                </div>
-                <i class="fa-solid fa-microchip" style="color: #6b7280"></i>
-            </div>
-            <div style="margin-bottom: 10px;">
-                <span class="status-dot" style="background:${statusColor}"></span>
-                <span class="status-text" style="color:${statusColor}">${statusText}</span>
-            </div>
-            <div class="metrics">
-                <div class="metric-item">
-                    <span class="metric-label">NHIỆT ĐỘ</span>
-                    <span class="metric-value">${device.temp || '--'}°C</span>
-                </div>
-                <div class="metric-item">
-                    <span class="metric-label">ĐỘ ẨM</span>
-                    <span class="metric-value">${device.humid || '--'}%</span>
-                </div>
-                <div class="metric-item">
-                    <span class="metric-label">ÁNH SÁNG</span>
-                    <span class="metric-value">${device.light || '--'} Lux</span>
-                </div>
-            </div>
-            <div class="card-actions">
-                <button class="btn-sm" onclick="window.triggerEdit('${deviceId}', '${device.name}', ${device.interval || 30})">Sửa</button>
-                
-                <button class="btn-sm ${powerClass}" onclick="window.toggleDevice('${deviceId}', ${isActive})">
-                    ${powerIcon}
-                </button>
-            </div>
-        `;
+        // Status row
+        const statusRow = document.createElement('div');
+        statusRow.style.marginBottom = '10px';
+        const statusDot = document.createElement('span');
+        statusDot.className = 'status-dot';
+        const isActive = !!device.active;
+        const statusColor = isActive ? '#10b981' : '#9ca3af';
+        statusDot.style.background = statusColor;
+        const statusText = document.createElement('span');
+        statusText.className = 'status-text';
+        statusText.style.color = statusColor;
+        statusText.textContent = isActive ? `Đang đo (${device.interval || 30}s)` : 'Đã tắt';
+        statusRow.appendChild(statusDot);
+        statusRow.appendChild(statusText);
+
+        // Metrics
+        const metrics = document.createElement('div');
+        metrics.className = 'metrics';
+
+        const makeMetric = (label, value) => {
+            const item = document.createElement('div');
+            item.className = 'metric-item';
+            const lbl = document.createElement('span'); lbl.className = 'metric-label'; lbl.textContent = label;
+            const val = document.createElement('span'); val.className = 'metric-value'; val.textContent = value;
+            item.appendChild(lbl); item.appendChild(val);
+            return item;
+        };
+
+        metrics.appendChild(makeMetric('NHIỆT ĐỘ', (device.temp !== undefined ? device.temp : '--') + '°C'));
+        metrics.appendChild(makeMetric('ĐỘ ẨM', (device.humid !== undefined ? device.humid : '--') + '%'));
+        metrics.appendChild(makeMetric('ÁNH SÁNG', (device.light !== undefined ? device.light : '--') + ' Lux'));
+
+        // Actions
+        const actions = document.createElement('div');
+        actions.className = 'card-actions';
+
+        const btnEdit = document.createElement('button');
+        btnEdit.className = 'btn-sm';
+        btnEdit.textContent = 'Sửa';
+        btnEdit.addEventListener('click', () => window.triggerEdit(deviceId, device.name, device.interval || 30));
+
+        const btnPower = document.createElement('button');
+        const powerClass = isActive ? 'btn-warning' : 'btn-success';
+        btnPower.className = `btn-sm ${powerClass}`;
+        btnPower.innerHTML = isActive ? '<i class="fa-solid fa-power-off"></i> Tắt' : '<i class="fa-solid fa-play"></i> Bật';
+        btnPower.addEventListener('click', () => window.toggleDevice(deviceId, isActive));
+
+        actions.appendChild(btnEdit);
+        actions.appendChild(btnPower);
+
+        // Compose card
+        card.appendChild(header);
+        card.appendChild(statusRow);
+        card.appendChild(metrics);
+        card.appendChild(actions);
+
         grid.insertBefore(card, addBtn);
     });
 }
@@ -283,7 +321,7 @@ function setupModal() {
 
     if(btn) btn.onclick = () => modal.style.display = "block";
     if(span) span.onclick = () => modal.style.display = "none";
-    window.onclick = (e) => { if(e.target == modal) modal.style.display = "none"; }
+    window.addEventListener('click', (e) => { if(e.target == modal) modal.style.display = "none"; });
 
     if(form) {
         form.addEventListener('submit', async (e) => {

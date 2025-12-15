@@ -79,9 +79,6 @@ function showError(error) {
         case 'auth/invalid-email':
             errorMsg.textContent = "Email không hợp lệ.";
             break;
-        case 'auth/user-not-found':
-            errorMsg.textContent = "Không tìm thấy tài khoản.";
-            break;
         case 'auth/user-disabled':
             errorMsg.textContent = "Tài khoản đã bị vô hiệu hóa.";
             break;

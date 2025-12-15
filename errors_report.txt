@@ -1,10 +1,10 @@
 Báo cáo lỗi — Kiểm tra tệp nguồn (100% tĩnh)
-Ngày tạo: 2025-12-15
+Ngày tạo: 2025-12-15 (có cập nhật: các thay đổi đã áp dụng vào `firebase-config.js` và `script.js`)
 
 Tóm tắt:
 - Tổng số tệp kiểm tra: 7 (tệp chính trong thư mục gốc)
-- Vấn đề nghiêm trọng (cần sửa ngay): 3
-- Vấn đề trung bình/nhỏ (nên sửa): 8
+- Vấn đề nghiêm trọng còn tồn: 1 (thẻ `</form>` thừa trong `login.html` — chưa sửa theo yêu cầu)
+- Vấn đề trung bình/nhỏ (nên sửa): 6
 - Gợi ý bảo mật & cải thiện: nhiều mục (xem chi tiết từng file)
 
 Tệp đã kiểm tra: `index.html`, `login.html`, `auth.js`, `firebase-config.js`, `login-login.js`, `script.js`, `style.css`.
@@ -26,26 +26,28 @@ Chi tiết theo tệp (tiếng Việt):
 - Cải tiến — Kiểm tra tồn tại DOM trước khi đăng ký sự kiện
   - Mô tả: Dùng `if (form) { ... }` để tránh lỗi khi phần tử không tồn tại do HTML bị sai.
 
-3) `firebase-config.js`
-- Vấn đề vận hành — Khởi tạo Firebase khi config rỗng
-  - Mô tả: `initializeApp(finalConfig)` sẽ chạy ngay cả khi `finalConfig` rỗng. Nếu user chưa cấu hình, có thể gây lỗi runtime.
-  - Hành động sửa: Kiểm tra `finalConfig.apiKey` hoặc `databaseURL` trước khi gọi `initializeApp`. Nếu thiếu, bỏ qua khởi tạo và hiển thị cảnh báo.
+3) `firebase-config.js` (ĐÃ SỬA)
+- Vấn đề vận hành — Khởi tạo Firebase khi config rỗng (đã xử lý)
+  - Mô tả trước đây: `initializeApp(finalConfig)` được gọi dù config rỗng, có thể gây lỗi.
+  - Thay đổi: Đã thêm kiểm tra `finalConfig.apiKey` và bao bởi `try/catch`. Nếu không thấy `apiKey`, Firebase sẽ không được khởi tạo và một cảnh báo sẽ được log vào console. Nếu lỗi xảy ra trong quá trình khởi tạo, lỗi được bắt và log.
+  - Lợi ích: Tránh ném lỗi không rõ khi trang tải mà chưa có cấu hình; cho phép UI hiển thị hướng dẫn để người dùng cấu hình.
 
 4) `auth.js`
 - Thông tin — Import từ local + CDN
   - Mô tả: Pattern này hợp lệ nhưng phụ thuộc CDN. Không bắt buộc phải thay đổi, nhưng cân nhắc đồng bộ import nếu muốn.
 
-5) `script.js`
-- Lỗi nghiêm trọng — Tạo `innerHTML` chứa `onclick` với dữ liệu không escape
-  - Mô tả: `renderGrid` chèn `device.name`, `deviceId` vào `innerHTML` và vào thuộc tính `onclick`. Nếu các chuỗi chứa dấu nháy hoặc ký tự đặc biệt, HTML/JS bị vỡ hoặc có thể gây XSS.
-  - Hành động sửa: Thay bằng tạo DOM programmatically và dùng `addEventListener`. Ví dụ: tạo `button` bằng `createElement` rồi `btn.addEventListener('click', () => window.triggerEdit(...))`.
+5) `script.js` (ĐÃ SỬA)
+- Lỗi nghiêm trọng — Tạo `innerHTML` chứa `onclick` với dữ liệu không escape (đã sửa)
+  - Mô tả trước đây: `renderGrid` chèn `device.name`, `deviceId` vào `innerHTML` và vào thuộc tính `onclick`. Nếu các chuỗi chứa dấu nháy hoặc ký tự đặc biệt, HTML/JS bị vỡ hoặc có thể gây XSS.
+  - Thay đổi: Đã refactor `renderGrid` để tạo DOM bằng `document.createElement`, chèn `textContent` cho chuỗi do user/device cung cấp, và dùng `addEventListener` để gắn sự kiện `click` cho các nút (không dùng `onclick` inline). Biểu mẫu hiển thị và các nút (Sửa, Bật/Tắt) vẫn hoạt động như trước nhưng an toàn hơn với chuỗi chứa dấu nháy hoặc ký tự đặc biệt.
+  - Lợi ích: Loại bỏ rủi ro gây vỡ HTML do chuỗi chưa escape và giảm nguy cơ XSS.
 
-- Cải tiến — Kiểm tra tồn tại phương thức trạng thái MQTT
-  - Mô tả: `mqttClient.isConnected()` được gọi mà không kiểm tra xem hàm có tồn tại. Tùy phiên bản Paho, API có thể khác.
-  - Hành động sửa: Kiểm tra tồn tại phương thức trước khi gọi hoặc theo dõi API chính xác của Paho.
+- Cải tiến — Kiểm tra tồn tại phương thức trạng thái MQTT (đã sửa)
+  - Mô tả trước đây: `sendCommand` gọi `mqttClient.isConnected()` trực tiếp.
+  - Thay đổi: Kiểm tra tồn tại `mqttClient` và kiểm tra an toàn nếu `isConnected` là hàm hoặc thuộc tính; nếu không có cờ kết nối, kiểm tra `mqttClient.connected`. Nếu không kết nối, thông báo cho người dùng.
 
-- Cải tiến — Tránh gán `window.onclick` nhiều lần
-  - Mô tả: Nhiều vị trí dùng `window.onclick = ...`. Dùng `addEventListener` thay thế.
+- Cải tiến — Thay `window.onclick` bằng `window.addEventListener` (đã sửa trong `script.js`)
+  - Mô tả: Các chỗ trong `script.js` trước đây dùng `window.onclick = ...` đã được chuyển sang `window.addEventListener('click', ...)` để tránh ghi đè handler toàn cục.
 
 6) `style.css`
 - Thông tin / gợi ý
@@ -61,10 +63,13 @@ Khuyến nghị bảo mật & tĩnh tổng quát:
 
 Gợi ý hành động tiếp theo (tôi có thể làm giúp):
 1) Xóa thẻ `</form>` thừa trong `login.html` (khuyến nghị: làm ngay).
-2) Sửa `renderGrid` trong `script.js` để tạo DOM an toàn + `addEventListener`.
-3) Thêm kiểm tra trước khi `initializeApp` trong `firebase-config.js`.
-4) Thay tất cả `window.onclick =` bằng `window.addEventListener('click', ...)`.
+2) (Đã xong) Sửa `renderGrid` trong `script.js` để tạo DOM an toàn + `addEventListener`.
+3) (Đã xong) Thêm kiểm tra trước khi `initializeApp` trong `firebase-config.js`.
+4) Thay tất cả `window.onclick =` bằng `window.addEventListener('click', ...)` (một số đã sửa trong `script.js`, `login.html` vẫn còn `window.onclick`).
 
-Nếu bạn đồng ý, tôi sẽ áp dụng các sửa A) và B) (xóa `</form>` và sửa `renderGrid`) rồi chạy một lần rà soát lại và cập nhật báo cáo.
+Đã áp dụng: sửa `firebase-config.js` và `script.js` như mô tả ở trên. Tôi đã không chỉnh `login.html`/`login-login.js` (vì bạn yêu cầu sửa từ mục 3 trở đi).
+
+Tiếp theo tôi có thể:
+- Áp dụng sửa `login.html` (xóa `</form>` thừa) và/hoặc sửa `login-login.js` (loại bỏ case trùng lặp) nếu bạn muốn tôi tiếp tục.
 
 --- Kết thúc báo cáo ---

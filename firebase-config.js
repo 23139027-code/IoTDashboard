@@ -28,9 +28,24 @@ if (savedConfigString) {
     }
 }
 
-// 3. Khởi tạo Firebase với cấu hình cuối cùng
-const app = initializeApp(finalConfig);
-const auth = getAuth(app);
-const db = getDatabase(app);
+// 3. Khởi tạo Firebase với cấu hình cuối cùng (an toàn hơn)
+let app = null;
+let auth = null;
+let db = null;
+
+// Nếu không có apiKey, bỏ qua khởi tạo và ghi cảnh báo — tránh ném lỗi không rõ
+if (finalConfig && finalConfig.apiKey) {
+    try {
+        app = initializeApp(finalConfig);
+        auth = getAuth(app);
+        db = getDatabase(app);
+        console.log('Firebase initialized with user config.');
+    } catch (e) {
+        console.error('Lỗi khi khởi tạo Firebase:', e);
+        // Giữ auth/db là null để phần còn lại của app có thể kiểm tra
+    }
+} else {
+    console.warn('Firebase config thiếu (apiKey). Firebase chưa được khởi tạo. Vui lòng cấu hình trong giao diện.');
+}
 
 export { auth, db };
