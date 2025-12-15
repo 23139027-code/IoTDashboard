@@ -956,7 +956,7 @@ window.fetchAllHistoryData = async function () {
                 <td>${timeStr}</td>
                 <td>${row.temp} °C</td>
                 <td>${row.humid} %</td>
-                <td>${row.lux} Lux</td>
+                <td>${row.light} Lux</td>
             `;
             tbody.appendChild(tr);
         });

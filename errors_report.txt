@@ -214,6 +214,11 @@ Chi tiết theo tệp (tiếng Việt):
     + Biểu đồ cập nhật đúng dữ liệu lux
     + Bảng xuất dữ liệu hiển thị đúng
     + Đồng bộ hoàn toàn với Firebase schema
+  
+  - Lỗi bổ sung (18:57): Bảng Dữ Liệu hiển thị "undefined Lux"
+    + Nguyên nhân: Khi tạo row object dùng key `light: val.lux` nhưng hiển thị lại dùng `row.lux`
+    + Sửa: Đổi `${row.lux}` thành `${row.light}` ở dòng 959 để khớp với key của object
+    + Giải thích: Object row có structure `{light: val.lux}` nên phải truy cập qua `row.light` chứ không phải `row.lux`
 
 Khuyến nghị bảo mật & tĩnh tổng quát:
 - Không chèn trực tiếp dữ liệu bên ngoài vào `innerHTML`.
