@@ -220,6 +220,33 @@ Chi tiết theo tệp (tiếng Việt):
     + Sửa: Đổi `${row.lux}` thành `${row.light}` ở dòng 959 để khớp với key của object
     + Giải thích: Object row có structure `{light: val.lux}` nên phải truy cập qua `row.light` chứ không phải `row.lux`
 
+- CẬP NHẬT 2025-12-15 19:27 (NHÁNH TEST): Cải thiện CSS layout cho cards
+  - Vấn đề 1: Card có chiều cao quá lớn với khoảng trống dư thừa bên dưới
+  - Vấn đề 2: 3 thông số (Nhiệt độ, Độ ẩm, Ánh sáng) hiển thị không đồng nhất - lúc label và value cùng hàng, lúc khác hàng
+  - Nguyên nhân:
+    + Card padding quá lớn (20px)
+    + Margins giữa các sections (metrics, card-actions) quá lớn
+    + `.metric-item` không có `flex-direction: column` nên layout phụ thuộc vào độ dài text
+  - Thay đổi chi tiết:
+    + **`.metric-item`**: Thêm flex column layout để label luôn ở trên, value ở dưới:
+      ```css
+      .metric-item { 
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          text-align: center; 
+      }
+      ```
+    + **`.report-card`**: Giảm padding từ 20px → 16px, thêm `max-height: fit-content`
+    + **`.metrics`**: Giảm padding từ 15px → 12px, margin-bottom từ 20px → 12px
+    + **`.card-actions`**: Loại bỏ margin-top (từ 15px → 0)
+  - Lợi ích:
+    + Card gọn gàng hơn, không có khoảng trống dư thừa
+    + 3 thông số hiển thị đồng nhất: label luôn ở trên, số ở dưới (dạng cột)
+    + Layout responsive tốt hơn, không phụ thuộc độ dài text
+    + Cải thiện UX với spacing hợp lý hơn
+
 Khuyến nghị bảo mật & tĩnh tổng quát:
 - Không chèn trực tiếp dữ liệu bên ngoài vào `innerHTML`.
 - Dùng `addEventListener` để đăng ký sự kiện global thay vì gán thuộc tính `window.onclick`.
