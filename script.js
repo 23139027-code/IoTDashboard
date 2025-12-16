@@ -468,6 +468,7 @@ window.toggleDevice = async (id, currentStatus) => {
         if (newStatus === false) {
             updates.fan_active = false;    // Tắt quạt
             updates.lamp_active = false;   // Tắt đèn
+            updates.ac_active = false;     // Tắt điều hòa
         }
 
         // Gửi cập nhật lên Firebase
@@ -541,14 +542,14 @@ function updateActiveMenu(index) {
 
 // --- 3. LOGIC BIỂU ĐỒ & BÁO CÁO (QUAN TRỌNG) ---
 
-// Render danh sách phòng ở trang Báo Cáo
-async function renderReportList() {
+// Render danh sách phòng ở trang Báo Cáo với REALTIME UPDATE
+function renderReportList() {
     const grid = document.getElementById('report-list');
     if (!grid) return;
     grid.innerHTML = '<p style="color:#666">Đang tải dữ liệu...</p>';
 
-    try {
-        const snapshot = await get(ref(db, 'devices'));
+    // SỬA: Dùng onValue thay vì get để cập nhật realtime
+    onValue(ref(db, 'devices'), (snapshot) => {
         grid.innerHTML = '';
 
         if (snapshot.exists()) {
@@ -559,6 +560,7 @@ async function renderReportList() {
 
                 const card = document.createElement('div');
                 card.className = 'report-card';
+                card.setAttribute('data-device-id', deviceId); // Thêm ID để dễ update
 
                 // Header
                 const header = document.createElement('div');
@@ -650,10 +652,10 @@ async function renderReportList() {
         } else {
             grid.innerHTML = '<p>Chưa có thiết bị nào.</p>';
         }
-    } catch (err) {
+    }, (err) => {
         console.error(err);
         grid.innerHTML = '<p style="color:#ef4444">Lỗi tải dữ liệu</p>';
-    }
+    });
 }
 
 // Hàm chọn loại biểu đồ (Gắn vào window để HTML gọi)
@@ -744,6 +746,7 @@ async function showChart(deviceId, deviceName) {
         // Switch
         if (document.getElementById('toggle-fan')) document.getElementById('toggle-fan').checked = (data.fan_active === true);
         if (document.getElementById('toggle-lamp')) document.getElementById('toggle-lamp').checked = (data.lamp_active === true);
+        if (document.getElementById('toggle-ac')) document.getElementById('toggle-ac').checked = (data.ac_active === true);
 
 
         // --- B. CẬP NHẬT BIỂU ĐỒ - CHỈ KHI DỮ LIỆU SENSOR THAY ĐỔI ---
@@ -878,7 +881,7 @@ function drawChartNewLogic() {
     });
 }
 
-// Hàm xử lý 2 nút gạt Quick Control
+// Hàm xử lý 3 nút gạt Quick Control
 window.toggleFeature = async (feature) => {
     if (!currentReportDeviceId) return;
 
@@ -892,6 +895,9 @@ window.toggleFeature = async (feature) => {
     } else if (feature === 'lamp') {
         isChecked = document.getElementById('toggle-lamp').checked;
         dbKey = 'lamp_active';
+    } else if (feature === 'ac') {
+        isChecked = document.getElementById('toggle-ac').checked;
+        dbKey = 'ac_active';
     }
 
     try {

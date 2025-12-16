@@ -1,6 +1,122 @@
 Báo cáo lỗi — Kiểm tra tệp nguồn (100% tĩnh)
-Ngày tạo: 2025-12-15 (cập nhật mới nhất: 2025-12-15 19:15)
+Ngày tạo: 2025-12-15 (cập nhật mới nhất: 2025-12-16 10:30)
 Nhánh hiện tại: test
+
+========================================
+PHÂN TÍCH VAI TRÒ MQTT TRONG HỆ THỐNG (2025-12-16)
+========================================
+
+🔍 KẾT LUẬN CHÍNH:
+MQTT trong hệ thống hiện tại là một TÍNH NĂNG CHẾT (Dead Code) - được khai báo, khởi tạo kết nối nhưng HOÀN TOÀN KHÔNG ĐƯỢC SỬ DỤNG trong bất kỳ luồng xử lý nào.
+
+📊 PHÂN TÍCH CHI TIẾT:
+
+1. CODE MQTT HIỆN CÓ:
+   
+   Location: script.js dòng 15-122
+   
+   a) Khai báo cấu hình:
+   ```javascript
+   const mqttConfig = {
+       host: "broker.emqx.io",
+       port: 8083,
+       path: "/mqtt",
+       clientId: "WebDashboard_" + Math.random().toString(16).substr(2, 8)
+   };
+   let mqttClient;
+   ```
+   
+   b) Hàm kết nối:
+   - connectMQTT() được gọi trong DOMContentLoaded
+   - Tạo client với Paho.MQTT.Client
+   - Có handler onConnectionLost, onSuccess, onFailure
+   - Hiển thị status badge: "MQTT: Connected/Disconnected"
+   
+   c) Hàm gửi lệnh:
+   - sendCommand(deviceId, cmd, val) được định nghĩa NHƯNG KHÔNG BAO GIỜ ĐƯỢC GỌI
+   - Format topic: `DATALOGGER/${deviceId}/CMD`
+   - Payload: JSON.stringify({ cmd: cmd, val: val })
+
+2. TẠI SAO MQTT KHÔNG HOẠT ĐỘNG:
+
+   ❌ Hàm sendCommand() KHÔNG được gọi ở bất kỳ đâu:
+   - Tìm kiếm toàn bộ codebase: grep "sendCommand(" 
+   - Kết quả: CHỈ có định nghĩa hàm, KHÔNG có lời gọi
+   
+   ❌ Không có Subscribe để nhận message từ ESP32:
+   - Thiếu mqttClient.subscribe() để lắng nghe topic từ thiết bị
+   - Thiếu mqttClient.onMessageArrived để xử lý dữ liệu nhận được
+   
+   ✅ Thực tế hệ thống dùng FIREBASE làm mọi thứ:
+   - ESP32 đẩy dữ liệu sensor → Firebase Realtime Database
+   - Web Dashboard lắng nghe Firebase (onValue) → Hiển thị realtime
+   - Web gửi lệnh điều khiển → Firebase (update)
+   - ESP32 lắng nghe Firebase → Nhận lệnh và thực thi
+
+3. KIẾN TRÚC THỰC TẾ ĐANG HOẠT ĐỘNG:
+
+   ESP32 ←→ FIREBASE ←→ WEB DASHBOARD
+   
+   - ESP32 → Firebase: Gửi dữ liệu sensor (temp, humid, lux) + trạng thái (active, fan_active, lamp_active, ac_active)
+   - Firebase → Web: onValue() listeners cập nhật UI realtime
+   - Web → Firebase: update() khi user toggle switch/button
+   - Firebase → ESP32: ESP32 lắng nghe Firebase để nhận lệnh điều khiển
+   
+   MQTT hoàn toàn KHÔNG tham gia vào luồng này!
+
+4. TẠI SAO CÓ CODE MQTT:
+
+   Phỏng đoán:
+   - Dự định ban đầu: Dùng MQTT cho giao tiếp realtime ESP32 ↔ Web
+   - Thực tế triển khai: Chuyển sang dùng Firebase vì dễ hơn (không cần MQTT broker, có authentication sẵn)
+   - Code MQTT còn sót lại từ giai đoạn phát triển đầu
+   - Status badge "MQTT: Connected" gây hiểu lầm là hệ thống đang dùng MQTT
+
+5. TÁC ĐỘNG & KHUYẾN NGHỊ:
+
+   ⚠️ Vấn đề hiện tại:
+   - Tốn băng thông: Kết nối WebSocket đến broker.emqx.io không cần thiết
+   - Tốn tài nguyên: Load thư viện Paho MQTT (mqttws31.min.js) 90KB không dùng đến
+   - Gây nhầm lẫn: Developer nghĩ hệ thống dùng MQTT nhưng thực tế không
+   - UI hiển thị sai: Badge "MQTT: Connected" không phản ánh đúng kiến trúc
+   
+   ✅ KHUYẾN NGHỊ:
+   
+   Option 1: XÓA TOÀN BỘ CODE MQTT (Khuyên dùng nếu không có kế hoạch dùng MQTT)
+   - Xóa mqttConfig, mqttClient, connectMQTT(), sendCommand()
+   - Xóa <script> tag load Paho MQTT trong index.html dòng 14
+   - Xóa badge #mqtt-status trong header
+   - Giảm kích thước trang, tăng tốc độ load
+   
+   Option 2: TRIỂN KHAI MQTT THẬT (Nếu muốn dùng MQTT song song với Firebase)
+   - Subscribe topic từ ESP32: `DATALOGGER/${deviceId}/DATA`
+   - Thêm onMessageArrived handler để nhận dữ liệu sensor realtime
+   - Gọi sendCommand() khi user toggle switch/button
+   - Lợi ích: Giảm tải Firebase, latency thấp hơn
+   - Nhược điểm: Phức tạp hơn, phải đồng bộ 2 kênh (Firebase + MQTT)
+   
+   Option 3: GIỮ CODE NHƯNG TẮT KẾT NỐI (Tạm thời)
+   - Comment dòng connectMQTT() trong DOMContentLoaded
+   - Ẩn hoặc xóa badge #mqtt-status
+   - Giữ code để sau này có thể dùng nếu cần
+
+6. KẾT LUẬN:
+
+   Hệ thống của bạn đang hoạt động HOÀN TOÀN bằng Firebase Realtime Database.
+   MQTT chỉ là code thừa không được sử dụng.
+   
+   Firebase là lựa chọn tốt cho project này vì:
+   ✅ Authentication tích hợp sẵn
+   ✅ Realtime sync tự động
+   ✅ Lưu trữ dữ liệu lịch sử dễ dàng
+   ✅ SDK đơn giản, ít code hơn MQTT
+   
+   Tuy nhiên:
+   ⚠️ Chi phí có thể cao nếu scale lên (nhiều thiết bị, traffic cao)
+   ⚠️ Phụ thuộc vào dịch vụ của Google
+   ⚠️ Latency có thể cao hơn MQTT trực tiếp (phải qua Firebase server)
+
+========================================
 
 KẾT QUẢ KIỂM TRA MỚI NHẤT (2025-12-15 19:15 - Branch: test):
 ✅ Không phát hiện lỗi nghiêm trọng mới
