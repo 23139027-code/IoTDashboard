@@ -13,13 +13,44 @@ let cachedHistoryData = { labels: [], temps: [], humids: [], lights: [] };
 requireAuth();
 
 // --- CẤU HÌNH MQTT ---
-const mqttConfig = {
-    host: "broker.emqx.io",
-    port: 8083,
-    path: "/mqtt",
-    clientId: "WebDashboard_" + Math.random().toString(16).substr(2, 8)
-};
+// Load cấu hình MQTT từ localStorage hoặc dùng mặc định
+function loadMQTTConfig() {
+    const savedConfig = localStorage.getItem('mqtt_config');
+    if (savedConfig) {
+        try {
+            const config = JSON.parse(savedConfig);
+            return {
+                host: config.host || "broker.emqx.io",
+                port: config.port || 8083,
+                path: config.path || "/mqtt",
+                useSSL: config.useSSL || false,
+                username: config.username || "",
+                password: config.password || "",
+                keepalive: config.keepalive || 60,
+                reconnect: config.reconnect !== false,
+                clientId: "WebDashboard_" + Math.random().toString(16).substr(2, 8)
+            };
+        } catch (e) {
+            console.error("Lỗi load MQTT config:", e);
+        }
+    }
+    // Cấu hình mặc định
+    return {
+        host: "broker.emqx.io",
+        port: 8083,
+        path: "/mqtt",
+        useSSL: false,
+        username: "",
+        password: "",
+        keepalive: 60,
+        reconnect: true,
+        clientId: "WebDashboard_" + Math.random().toString(16).substr(2, 8)
+    };
+}
+
+const mqttConfig = loadMQTTConfig();
 let mqttClient;
+let subscribedDevices = new Set(); // Track các thiết bị đã subscribe
 
 document.addEventListener('DOMContentLoaded', () => {
     // 2. Gán sự kiện Logout
@@ -77,28 +108,51 @@ function monitorConnection() {
 function connectMQTT() {
     try {
         mqttClient = new Paho.MQTT.Client(mqttConfig.host, mqttConfig.port, mqttConfig.path, mqttConfig.clientId);
+        
+        // Handler khi mất kết nối
         mqttClient.onConnectionLost = (obj) => {
             console.log("MQTT Lost:", obj.errorMessage);
             updateStatus('mqtt-status', 'error', 'MQTT: Lost');
+            subscribedDevices.clear(); // Clear danh sách subscribe
         };
-        mqttClient.connect({
+        
+        // Handler nhận message từ ESP32
+        mqttClient.onMessageArrived = (message) => {
+            handleMQTTMessage(message);
+        };
+        
+        // Tạo connect options từ config
+        const connectOptions = {
             onSuccess: () => {
-                console.log("MQTT Connected");
-                updateStatus('mqtt-status', 'success', 'MQTT: Connected');
+                console.log("MQTT Connected to", mqttConfig.host);
+                updateStatus('mqtt-status', 'success', `MQTT: Connected (${mqttConfig.host})`);
+                // Subscribe các topic từ devices hiện có
+                subscribeToAllDevices();
             },
             onFailure: (e) => {
                 console.log("MQTT Fail", e);
                 updateStatus('mqtt-status', 'error', 'MQTT: Failed');
             },
-            useSSL: false
-        });
+            useSSL: mqttConfig.useSSL,
+            keepAliveInterval: mqttConfig.keepalive,
+            reconnect: mqttConfig.reconnect,
+            timeout: 10
+        };
+        
+        // Thêm username/password nếu có
+        if (mqttConfig.username) {
+            connectOptions.userName = mqttConfig.username;
+            connectOptions.password = mqttConfig.password;
+        }
+        
+        mqttClient.connect(connectOptions);
     } catch (e) {
         console.error("Lỗi khởi tạo MQTT:", e);
     }
 }
 
-function sendCommand(deviceId, cmd, val = "") {
-    // Kiểm tra an toàn: nhiều phiên bản Paho có isConnected() như hàm, hoặc có cờ .connected
+// Hàm kiểm tra MQTT connected
+function isMQTTConnected() {
     let connected = false;
     try {
         if (!mqttClient) connected = false;
@@ -108,18 +162,113 @@ function sendCommand(deviceId, cmd, val = "") {
     } catch (e) {
         connected = false;
     }
+    return connected;
+}
 
-    if (!connected) {
-        alert("Chưa kết nối MQTT!");
-        return;
+// Subscribe tất cả devices khi kết nối MQTT
+async function subscribeToAllDevices() {
+    try {
+        const snapshot = await get(ref(db, 'devices'));
+        if (snapshot.exists()) {
+            const devices = snapshot.val();
+            Object.keys(devices).forEach(deviceId => {
+                subscribeDevice(deviceId);
+            });
+        }
+    } catch (err) {
+        console.error("Lỗi subscribe devices:", err);
+    }
+}
+
+// Subscribe 1 device cụ thể
+function subscribeDevice(deviceId) {
+    if (!isMQTTConnected()) return;
+    
+    const topic = `DATALOGGER/${deviceId}/DATA`;
+    
+    if (!subscribedDevices.has(deviceId)) {
+        try {
+            mqttClient.subscribe(topic);
+            subscribedDevices.add(deviceId);
+            console.log(`Subscribed to: ${topic}`);
+        } catch (e) {
+            console.error(`Lỗi subscribe ${topic}:`, e);
+        }
+    }
+}
+
+// Xử lý message MQTT nhận được từ ESP32
+function handleMQTTMessage(message) {
+    try {
+        const topic = message.destinationName;
+        const payload = JSON.parse(message.payloadString);
+        
+        console.log("MQTT Received:", topic, payload);
+        
+        // Extract deviceId từ topic: DATALOGGER/{deviceId}/DATA
+        const parts = topic.split('/');
+        if (parts.length >= 3 && parts[0] === 'DATALOGGER' && parts[2] === 'DATA') {
+            const deviceId = parts[1];
+            
+            // Cập nhật dữ liệu lên Firebase để lưu trữ lịch sử
+            updateFirebaseFromMQTT(deviceId, payload);
+        }
+    } catch (err) {
+        console.error("Lỗi xử lý MQTT message:", err);
+    }
+}
+
+// Cập nhật dữ liệu từ MQTT lên Firebase (chỉ để lưu trữ)
+async function updateFirebaseFromMQTT(deviceId, payload) {
+    try {
+        const updates = {
+            last_update: Date.now()
+        };
+        
+        // Lưu các giá trị sensor nếu có
+        if (payload.temp !== undefined) updates.temp = payload.temp;
+        if (payload.humid !== undefined) updates.humid = payload.humid;
+        if (payload.lux !== undefined) updates.lux = payload.lux;
+        if (payload.wifi_ssid !== undefined) updates.wifi_ssid = payload.wifi_ssid;
+        
+        // Cập nhật vào devices
+        await update(ref(db, `devices/${deviceId}`), updates);
+        
+        // Lưu vào history nếu có đủ dữ liệu sensor
+        if (payload.temp !== undefined && payload.humid !== undefined && payload.lux !== undefined) {
+            const historyData = {
+                temp: payload.temp,
+                humid: payload.humid,
+                lux: payload.lux,
+                last_update: Date.now()
+            };
+            await push(ref(db, `history/${deviceId}`), historyData);
+        }
+    } catch (err) {
+        console.error("Lỗi cập nhật Firebase:", err);
+    }
+}
+
+// Gửi lệnh điều khiển qua MQTT
+function sendCommand(deviceId, cmd, val = "") {
+    if (!isMQTTConnected()) {
+        alert("Chưa kết nối MQTT! Không thể gửi lệnh.");
+        return false;
     }
 
     const topic = `DATALOGGER/${deviceId}/CMD`;
     const payload = JSON.stringify({ cmd: cmd, val: val });
     const message = new Paho.MQTT.Message(payload);
     message.destinationName = topic;
-    mqttClient.send(message);
-    console.log(`Sent: ${payload}`);
+    
+    try {
+        mqttClient.send(message);
+        console.log(`MQTT Sent [${topic}]:`, payload);
+        return true;
+    } catch (e) {
+        console.error("Lỗi gửi MQTT:", e);
+        return false;
+    }
 }
 
 // --- CÁC HÀM FIREBASE ---
@@ -366,8 +515,15 @@ function setupModal() {
             };
 
             try {
-                // Khi lưu vào Firebase, simulator (ESP32) sẽ tự đọc được nếu nó lắng nghe realtime
+                // Lưu vào Firebase
                 await update(ref(db, `devices/${id}`), deviceConfig);
+                
+                // Subscribe MQTT cho device mới
+                subscribeDevice(id);
+                
+                // Gửi lệnh START qua MQTT để kích hoạt device
+                sendCommand(id, 'START');
+                
                 alert("Thêm thiết bị thành công!");
                 modal.style.display = "none";
                 form.reset();
@@ -382,7 +538,7 @@ function setupMasterSwitch() {
     const btn = document.getElementById('master-switch');
     if (!btn) return;
 
-    // 1. Xử lý khi nhấn nút
+    // 1. Xử lý khi nhấn nút (DÙNG MQTT)
     btn.addEventListener('click', async () => {
         // Kiểm tra xem nút đang ở trạng thái nào (dựa vào class)
         // Nếu đang có class 'is-on' nghĩa là hệ thống đang chạy -> Cần TẮT (false)
@@ -396,11 +552,26 @@ function setupMasterSwitch() {
             if (snapshot.exists()) {
                 const devices = snapshot.val();
                 const updates = {};
+                const cmd = targetState ? 'START' : 'STOP';
 
-                // Tạo lệnh update cho TẤT CẢ thiết bị
+                // Gửi lệnh MQTT cho TẤT CẢ thiết bị
                 Object.keys(devices).forEach(key => {
-                    // Gom tất cả lệnh update vào 1 biến updates
+                    sendCommand(key, cmd);
+                    
+                    // Nếu tắt hệ thống, tắt luôn các thiết bị con
+                    if (!targetState) {
+                        sendCommand(key, 'FAN', '0');
+                        sendCommand(key, 'LAMP', '0');
+                        sendCommand(key, 'AC', '0');
+                    }
+                    
+                    // Cập nhật Firebase để đồng bộ UI
                     updates[`devices/${key}/active`] = targetState;
+                    if (!targetState) {
+                        updates[`devices/${key}/fan_active`] = false;
+                        updates[`devices/${key}/lamp_active`] = false;
+                        updates[`devices/${key}/ac_active`] = false;
+                    }
                 });
 
                 // Gửi 1 lệnh duy nhất lên Firebase (Atomic Update)
@@ -408,9 +579,6 @@ function setupMasterSwitch() {
 
                 // Cập nhật giao diện nút ngay lập tức
                 updateMasterButtonUI(targetState);
-
-                // Thông báo nhỏ
-                // alert(targetState ? "Đã KÍCH HOẠT toàn bộ hệ thống!" : "Đã NGẮT toàn bộ hệ thống!");
             }
         } catch (err) {
             alert("Lỗi thao tác hệ thống: " + err.message);
@@ -452,29 +620,41 @@ function updateStatus(id, type, text) {
     }
 }
 
-// Hàm Bật/Tắt thiết bị từ xa
+// Hàm Bật/Tắt thiết bị từ xa (DÙNG MQTT)
 window.toggleDevice = async (id, currentStatus) => {
     try {
         // Đảo ngược trạng thái hiện tại (Đang bật -> tắt, Đang tắt -> bật)
         const newStatus = !currentStatus;
 
-        // Tạo object chứa các thông tin cần cập nhật
+        // Gửi lệnh qua MQTT
+        const cmd = newStatus ? 'START' : 'STOP';
+        const success = sendCommand(id, cmd);
+        
+        if (!success) {
+            alert("Không thể gửi lệnh qua MQTT!");
+            return;
+        }
+
+        // Cập nhật trạng thái vào Firebase (để đồng bộ UI)
         const updates = {
             active: newStatus
         };
 
-        // LOGIC MỚI: Nếu hành động là TẮT NGUỒN (newStatus == false)
-        // Thì ép tắt luôn toàn bộ các công tắc con
+        // Nếu hành động là TẮT NGUỒN thì tắt luôn toàn bộ các công tắc con
         if (newStatus === false) {
             updates.fan_active = false;    // Tắt quạt
             updates.lamp_active = false;   // Tắt đèn
             updates.ac_active = false;     // Tắt điều hòa
+            
+            // Gửi lệnh tắt các thiết bị con qua MQTT
+            sendCommand(id, 'FAN', '0');
+            sendCommand(id, 'LAMP', '0');
+            sendCommand(id, 'AC', '0');
         }
 
-        // Gửi cập nhật lên Firebase
+        // Cập nhật Firebase để đồng bộ UI
         await update(ref(db, `devices/${id}`), updates);
 
-        // Giao diện (Checkbox) sẽ tự động cập nhật nhờ hàm onValue đang lắng nghe
     } catch (err) {
         alert("Lỗi cập nhật trạng thái: " + err.message);
     }
@@ -881,31 +1061,46 @@ function drawChartNewLogic() {
     });
 }
 
-// Hàm xử lý 3 nút gạt Quick Control
+// Hàm xử lý 3 nút gạt Quick Control (DÙNG MQTT)
 window.toggleFeature = async (feature) => {
     if (!currentReportDeviceId) return;
 
     // Lấy trạng thái hiện tại của checkbox
     let isChecked = false;
     let dbKey = '';
+    let mqttCmd = '';
 
     if (feature === 'fan') {
         isChecked = document.getElementById('toggle-fan').checked;
         dbKey = 'fan_active';
+        mqttCmd = 'FAN';
     } else if (feature === 'lamp') {
         isChecked = document.getElementById('toggle-lamp').checked;
         dbKey = 'lamp_active';
+        mqttCmd = 'LAMP';
     } else if (feature === 'ac') {
         isChecked = document.getElementById('toggle-ac').checked;
         dbKey = 'ac_active';
+        mqttCmd = 'AC';
     }
 
     try {
-        // Cập nhật lên Firebase
+        // Gửi lệnh qua MQTT
+        const mqttVal = isChecked ? '1' : '0';
+        const success = sendCommand(currentReportDeviceId, mqttCmd, mqttVal);
+        
+        if (!success) {
+            // Nếu MQTT fail, trả lại trạng thái cũ
+            document.getElementById(`toggle-${feature}`).checked = !isChecked;
+            alert("Không thể gửi lệnh qua MQTT!");
+            return;
+        }
+        
+        // Cập nhật Firebase để đồng bộ UI
         await update(ref(db, `devices/${currentReportDeviceId}`), {
             [dbKey]: isChecked
         });
-        // Không cần alert, switch sẽ tự giữ trạng thái
+        
     } catch (err) {
         console.error("Lỗi toggle:", err);
         // Nếu lỗi thì trả lại trạng thái cũ cho checkbox
@@ -1020,51 +1215,237 @@ window.exportTableToExcel = function () {
     link.click();
 }
 
-// --- LOGIC CÀI ĐẶT FIREBASE ---
+// --- LOGIC CÀI ĐẶT MQTT ---
 
-// 1. Hàm lưu cấu hình khi bấm nút Save
-window.saveFirebaseSettings = function (event) {
-    event.preventDefault(); // Chặn load lại trang ngay lập tức
+// 1. Hàm lưu cấu hình MQTT khi bấm nút Save
+window.saveMQTTSettings = function (event) {
+    event.preventDefault();
 
     const config = {
-        apiKey: document.getElementById('cfg-apiKey').value.trim(),
-        authDomain: document.getElementById('cfg-authDomain').value.trim(),
-        databaseURL: document.getElementById('cfg-databaseURL').value.trim(),
-        projectId: document.getElementById('cfg-projectId').value.trim(),
-        storageBucket: document.getElementById('cfg-storageBucket').value.trim(),
-        messagingSenderId: document.getElementById('cfg-messagingSenderId').value.trim(),
-        appId: document.getElementById('cfg-appId').value.trim(),
-        measurementId: document.getElementById('cfg-measurementId').value.trim()
+        host: document.getElementById('cfg-mqtt-host').value.trim(),
+        port: parseInt(document.getElementById('cfg-mqtt-port').value.trim()),
+        path: document.getElementById('cfg-mqtt-path').value.trim(),
+        useSSL: document.getElementById('cfg-mqtt-ssl').value === 'true',
+        username: document.getElementById('cfg-mqtt-username').value.trim(),
+        password: document.getElementById('cfg-mqtt-password').value.trim(),
+        keepalive: parseInt(document.getElementById('cfg-mqtt-keepalive').value.trim()) || 60,
+        reconnect: document.getElementById('cfg-mqtt-reconnect').value === 'true'
     };
 
-    // Lưu vào bộ nhớ trình duyệt
-    localStorage.setItem('user_firebase_config', JSON.stringify(config));
+    // Validate
+    if (!config.host) {
+        alert("Vui lòng nhập MQTT Broker Host!");
+        return;
+    }
+    if (!config.port || config.port < 1 || config.port > 65535) {
+        alert("Port không hợp lệ! (1-65535)");
+        return;
+    }
 
-    alert("Đã lưu cấu hình! Trang web sẽ tải lại để áp dụng.");
-    location.reload(); // Tải lại trang để file firebase-config.js đọc dữ liệu mới
+    // Lưu vào localStorage
+    localStorage.setItem('mqtt_config', JSON.stringify(config));
+
+    alert("Đã lưu cấu hình MQTT! Trang web sẽ tải lại để áp dụng.");
+    location.reload();
 };
 
-// 2. Hàm điền dữ liệu cũ vào form khi mở tab
+// 2. Hàm điền dữ liệu MQTT cũ vào form khi mở tab
 function loadSettingsToForm() {
-    const savedString = localStorage.getItem('user_firebase_config');
+    const savedString = localStorage.getItem('mqtt_config');
     if (savedString) {
-        const config = JSON.parse(savedString);
-        document.getElementById('cfg-apiKey').value = config.apiKey || '';
-        document.getElementById('cfg-authDomain').value = config.authDomain || '';
-        document.getElementById('cfg-databaseURL').value = config.databaseURL || '';
-        document.getElementById('cfg-projectId').value = config.projectId || '';
-        document.getElementById('cfg-storageBucket').value = config.storageBucket || '';
-        document.getElementById('cfg-messagingSenderId').value = config.messagingSenderId || '';
-        document.getElementById('cfg-appId').value = config.appId || '';
-        document.getElementById('cfg-measurementId').value = config.measurementId || '';
+        try {
+            const config = JSON.parse(savedString);
+            document.getElementById('cfg-mqtt-host').value = config.host || 'broker.emqx.io';
+            document.getElementById('cfg-mqtt-port').value = config.port || 8083;
+            document.getElementById('cfg-mqtt-path').value = config.path || '/mqtt';
+            document.getElementById('cfg-mqtt-ssl').value = config.useSSL ? 'true' : 'false';
+            document.getElementById('cfg-mqtt-username').value = config.username || '';
+            document.getElementById('cfg-mqtt-password').value = config.password || '';
+            document.getElementById('cfg-mqtt-keepalive').value = config.keepalive || 60;
+            document.getElementById('cfg-mqtt-reconnect').value = config.reconnect !== false ? 'true' : 'false';
+        } catch (e) {
+            console.error("Lỗi load cấu hình MQTT:", e);
+        }
+    } else {
+        // Load giá trị mặc định
+        document.getElementById('cfg-mqtt-host').value = 'broker.emqx.io';
+        document.getElementById('cfg-mqtt-port').value = 8083;
+        document.getElementById('cfg-mqtt-path').value = '/mqtt';
+        document.getElementById('cfg-mqtt-ssl').value = 'false';
+        document.getElementById('cfg-mqtt-keepalive').value = 60;
+        document.getElementById('cfg-mqtt-reconnect').value = 'true';
     }
 }
 
-// 3. Hàm xóa cấu hình (Reset)
-window.clearFirebaseSettings = function () {
-    if (confirm("Bạn có chắc muốn xóa cấu hình và dùng lại mặc định?")) {
-        localStorage.removeItem('user_firebase_config');
+// 3. Hàm xóa cấu hình MQTT (Reset)
+window.clearMQTTSettings = function () {
+    if (confirm("Bạn có chắc muốn xóa cấu hình MQTT và dùng lại mặc định?")) {
+        localStorage.removeItem('mqtt_config');
+        alert("Đã xóa cấu hình. Trang sẽ tải lại.");
         location.reload();
+    }
+};
+
+// 4. Hàm test kết nối MQTT
+window.testMQTTConnection = function () {
+    const host = document.getElementById('cfg-mqtt-host').value.trim();
+    const port = document.getElementById('cfg-mqtt-port').value.trim();
+    const path = document.getElementById('cfg-mqtt-path').value.trim();
+    const useSSL = document.getElementById('cfg-mqtt-ssl').value === 'true';
+    const username = document.getElementById('cfg-mqtt-username').value.trim();
+    const password = document.getElementById('cfg-mqtt-password').value.trim();
+
+    if (!host || !port) {
+        alert("Vui lòng nhập đầy đủ Host và Port!");
+        return;
+    }
+
+    alert("Đang test kết nối MQTT...\n\nBroker: " + host + ":" + port + "\nPath: " + path + "\nSSL: " + (useSSL ? "Có" : "Không"));
+
+    try {
+        const testClientId = "TestClient_" + Math.random().toString(16).substr(2, 8);
+        const testClient = new Paho.MQTT.Client(host, parseInt(port), path, testClientId);
+
+        testClient.onConnectionLost = (obj) => {
+            alert("❌ Test thất bại: Mất kết nối\n" + obj.errorMessage);
+        };
+
+        const connectOptions = {
+            onSuccess: () => {
+                alert("✅ Kết nối MQTT thành công!\n\nBroker: " + host + ":" + port + "\n\nBạn có thể lưu cấu hình này.");
+                testClient.disconnect();
+            },
+            onFailure: (e) => {
+                alert("❌ Kết nối MQTT thất bại!\n\nLỗi: " + e.errorMessage + "\n\nVui lòng kiểm tra lại thông tin broker.");
+            },
+            useSSL: useSSL,
+            timeout: 10
+        };
+
+        if (username) {
+            connectOptions.userName = username;
+            connectOptions.password = password;
+        }
+
+        testClient.connect(connectOptions);
+    } catch (e) {
+        alert("❌ Lỗi khởi tạo test MQTT:\n" + e.message);
+    }
+};
+
+// ============================================================
+// WIFI SETUP GUIDE - Hiển thị hướng dẫn kết nối WiFi cho ESP32
+// ============================================================
+window.showWiFiSetupGuide = async function() {
+    const instructionsDiv = document.getElementById('wifi-setup-instructions');
+    
+    if (!instructionsDiv) {
+        console.error('wifi-setup-instructions div not found');
+        return;
+    }
+
+    // Hiển thị loading
+    instructionsDiv.innerHTML = `
+        <div style="text-align: center; padding: 20px;">
+            <i class="fa-solid fa-spinner fa-spin" style="font-size: 24px; color: #f59e0b;"></i>
+            <p style="margin-top: 10px; color: #78350f;">Đang tải thông tin thiết bị...</p>
+        </div>
+    `;
+    instructionsDiv.style.display = 'block';
+
+    try {
+        // Lấy danh sách devices từ Firebase
+        const devicesRef = ref(db, 'devices');
+        const snapshot = await get(devicesRef);
+        
+        if (!snapshot.exists()) {
+            instructionsDiv.innerHTML = `
+                <p style="color: #dc2626; margin: 0;">
+                    <i class="fa-solid fa-circle-exclamation"></i> 
+                    Không tìm thấy thiết bị nào. Vui lòng thêm thiết bị trước.
+                </p>
+            `;
+            return;
+        }
+        
+        const devices = snapshot.val();
+        let setupDevices = [];
+        
+        // Tìm devices đang ở Setup Mode
+        for (const [id, data] of Object.entries(devices)) {
+            if (data.setup_mode === true) {
+                setupDevices.push({
+                    id: id,
+                    name: data.name || id,
+                    ap_ssid: data.ap_ssid || `ESP32-Setup-${id}`,
+                    ap_ip: data.ap_ip || '192.168.4.1'
+                });
+            }
+        }
+        
+        if (setupDevices.length === 0) {
+            instructionsDiv.innerHTML = `
+                <div style="padding: 10px;">
+                    <p style="color: #059669; margin: 0 0 10px 0;">
+                        <i class="fa-solid fa-circle-check"></i> 
+                        <strong>Tất cả thiết bị đã kết nối WiFi.</strong>
+                    </p>
+                    <p style="color: #666; font-size: 0.85rem; margin: 0;">
+                        Nếu bạn muốn đổi WiFi, vui lòng reset ESP32 hoặc xóa WiFi đã lưu trong code.
+                    </p>
+                </div>
+            `;
+        } else {
+            // Hiển thị hướng dẫn cho từng thiết bị
+            let html = '<h5 style="margin: 0 0 15px 0; color: #92400e;"><i class="fa-solid fa-mobile-screen"></i> Thiết bị cần cấu hình WiFi:</h5>';
+            
+            setupDevices.forEach((dev, index) => {
+                html += `
+                    <div style="margin: 15px 0; padding: 15px; background: #fffbeb; border-radius: 6px; border: 1px solid #fbbf24;">
+                        <h6 style="margin: 0 0 10px 0; color: #92400e; font-weight: 600;">
+                            ${index + 1}. ${dev.name} <span style="color: #999; font-weight: normal; font-size: 0.85em;">(${dev.id})</span>
+                        </h6>
+                        <ol style="margin: 5px 0; padding-left: 20px; color: #78350f; font-size: 0.85rem; line-height: 1.8;">
+                            <li>Bật <strong>điện thoại</strong> hoặc <strong>laptop</strong>, vào <strong>Cài đặt WiFi</strong></li>
+                            <li>Tìm và kết nối vào WiFi: 
+                                <br><span style="display: inline-block; margin: 5px 0; padding: 5px 10px; background: #f59e0b; color: white; border-radius: 4px; font-weight: 600;">
+                                    <i class="fa-solid fa-wifi"></i> ${dev.ap_ssid}
+                                </span>
+                                <br><small style="color: #999;">(Không cần mật khẩu)</small>
+                            </li>
+                            <li>Trình duyệt sẽ <strong>tự động mở</strong> trang cấu hình
+                                <br><small style="color: #666;">Nếu không tự mở, hãy truy cập: 
+                                    <code style="background: white; padding: 2px 6px; border-radius: 3px; color: #f59e0b; font-weight: 600;">${dev.ap_ip}</code>
+                                </small>
+                            </li>
+                            <li>Chọn <strong>WiFi gia đình</strong> của bạn trong danh sách hiển thị</li>
+                            <li>Nhập <strong>mật khẩu WiFi</strong> và nhấn nút <strong>"Save"</strong></li>
+                            <li>ESP32 sẽ tự động kết nối và xuất hiện trên Dashboard trong <strong>vài giây</strong> ✅</li>
+                        </ol>
+                    </div>
+                `;
+            });
+            
+            html += `
+                <div style="margin-top: 15px; padding: 10px; background: #f0f9ff; border-radius: 6px; border-left: 3px solid #3b82f6;">
+                    <p style="margin: 0; color: #1e40af; font-size: 0.85rem;">
+                        <i class="fa-solid fa-circle-info"></i> 
+                        <strong>Mẹo:</strong> Sau khi cấu hình xong, trang này sẽ tự động cập nhật khi ESP32 kết nối thành công.
+                    </p>
+                </div>
+            `;
+            
+            instructionsDiv.innerHTML = html;
+        }
+        
+    } catch (error) {
+        console.error('Error loading WiFi setup guide:', error);
+        instructionsDiv.innerHTML = `
+            <p style="color: #dc2626; margin: 0;">
+                <i class="fa-solid fa-triangle-exclamation"></i> 
+                Lỗi khi tải thông tin: ${error.message}
+            </p>
+        `;
     }
 };
 
