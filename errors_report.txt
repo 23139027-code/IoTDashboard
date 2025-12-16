@@ -1,12 +1,134 @@
 Báo cáo lỗi — Kiểm tra tệp nguồn (100% tĩnh)
-Ngày tạo: 2025-12-15 (cập nhật mới nhất: 2025-12-15 17:50)
+Ngày tạo: 2025-12-15 (cập nhật mới nhất: 2025-12-16 10:30)
 Nhánh hiện tại: test
+
+========================================
+PHÂN TÍCH VAI TRÒ MQTT TRONG HỆ THỐNG (2025-12-16)
+========================================
+
+🔍 KẾT LUẬN CHÍNH:
+MQTT trong hệ thống hiện tại là một TÍNH NĂNG CHẾT (Dead Code) - được khai báo, khởi tạo kết nối nhưng HOÀN TOÀN KHÔNG ĐƯỢC SỬ DỤNG trong bất kỳ luồng xử lý nào.
+
+📊 PHÂN TÍCH CHI TIẾT:
+
+1. CODE MQTT HIỆN CÓ:
+   
+   Location: script.js dòng 15-122
+   
+   a) Khai báo cấu hình:
+   ```javascript
+   const mqttConfig = {
+       host: "broker.emqx.io",
+       port: 8083,
+       path: "/mqtt",
+       clientId: "WebDashboard_" + Math.random().toString(16).substr(2, 8)
+   };
+   let mqttClient;
+   ```
+   
+   b) Hàm kết nối:
+   - connectMQTT() được gọi trong DOMContentLoaded
+   - Tạo client với Paho.MQTT.Client
+   - Có handler onConnectionLost, onSuccess, onFailure
+   - Hiển thị status badge: "MQTT: Connected/Disconnected"
+   
+   c) Hàm gửi lệnh:
+   - sendCommand(deviceId, cmd, val) được định nghĩa NHƯNG KHÔNG BAO GIỜ ĐƯỢC GỌI
+   - Format topic: `DATALOGGER/${deviceId}/CMD`
+   - Payload: JSON.stringify({ cmd: cmd, val: val })
+
+2. TẠI SAO MQTT KHÔNG HOẠT ĐỘNG:
+
+   ❌ Hàm sendCommand() KHÔNG được gọi ở bất kỳ đâu:
+   - Tìm kiếm toàn bộ codebase: grep "sendCommand(" 
+   - Kết quả: CHỈ có định nghĩa hàm, KHÔNG có lời gọi
+   
+   ❌ Không có Subscribe để nhận message từ ESP32:
+   - Thiếu mqttClient.subscribe() để lắng nghe topic từ thiết bị
+   - Thiếu mqttClient.onMessageArrived để xử lý dữ liệu nhận được
+   
+   ✅ Thực tế hệ thống dùng FIREBASE làm mọi thứ:
+   - ESP32 đẩy dữ liệu sensor → Firebase Realtime Database
+   - Web Dashboard lắng nghe Firebase (onValue) → Hiển thị realtime
+   - Web gửi lệnh điều khiển → Firebase (update)
+   - ESP32 lắng nghe Firebase → Nhận lệnh và thực thi
+
+3. KIẾN TRÚC THỰC TẾ ĐANG HOẠT ĐỘNG:
+
+   ESP32 ←→ FIREBASE ←→ WEB DASHBOARD
+   
+   - ESP32 → Firebase: Gửi dữ liệu sensor (temp, humid, lux) + trạng thái (active, fan_active, lamp_active, ac_active)
+   - Firebase → Web: onValue() listeners cập nhật UI realtime
+   - Web → Firebase: update() khi user toggle switch/button
+   - Firebase → ESP32: ESP32 lắng nghe Firebase để nhận lệnh điều khiển
+   
+   MQTT hoàn toàn KHÔNG tham gia vào luồng này!
+
+4. TẠI SAO CÓ CODE MQTT:
+
+   Phỏng đoán:
+   - Dự định ban đầu: Dùng MQTT cho giao tiếp realtime ESP32 ↔ Web
+   - Thực tế triển khai: Chuyển sang dùng Firebase vì dễ hơn (không cần MQTT broker, có authentication sẵn)
+   - Code MQTT còn sót lại từ giai đoạn phát triển đầu
+   - Status badge "MQTT: Connected" gây hiểu lầm là hệ thống đang dùng MQTT
+
+5. TÁC ĐỘNG & KHUYẾN NGHỊ:
+
+   ⚠️ Vấn đề hiện tại:
+   - Tốn băng thông: Kết nối WebSocket đến broker.emqx.io không cần thiết
+   - Tốn tài nguyên: Load thư viện Paho MQTT (mqttws31.min.js) 90KB không dùng đến
+   - Gây nhầm lẫn: Developer nghĩ hệ thống dùng MQTT nhưng thực tế không
+   - UI hiển thị sai: Badge "MQTT: Connected" không phản ánh đúng kiến trúc
+   
+   ✅ KHUYẾN NGHỊ:
+   
+   Option 1: XÓA TOÀN BỘ CODE MQTT (Khuyên dùng nếu không có kế hoạch dùng MQTT)
+   - Xóa mqttConfig, mqttClient, connectMQTT(), sendCommand()
+   - Xóa <script> tag load Paho MQTT trong index.html dòng 14
+   - Xóa badge #mqtt-status trong header
+   - Giảm kích thước trang, tăng tốc độ load
+   
+   Option 2: TRIỂN KHAI MQTT THẬT (Nếu muốn dùng MQTT song song với Firebase)
+   - Subscribe topic từ ESP32: `DATALOGGER/${deviceId}/DATA`
+   - Thêm onMessageArrived handler để nhận dữ liệu sensor realtime
+   - Gọi sendCommand() khi user toggle switch/button
+   - Lợi ích: Giảm tải Firebase, latency thấp hơn
+   - Nhược điểm: Phức tạp hơn, phải đồng bộ 2 kênh (Firebase + MQTT)
+   
+   Option 3: GIỮ CODE NHƯNG TẮT KẾT NỐI (Tạm thời)
+   - Comment dòng connectMQTT() trong DOMContentLoaded
+   - Ẩn hoặc xóa badge #mqtt-status
+   - Giữ code để sau này có thể dùng nếu cần
+
+6. KẾT LUẬN:
+
+   Hệ thống của bạn đang hoạt động HOÀN TOÀN bằng Firebase Realtime Database.
+   MQTT chỉ là code thừa không được sử dụng.
+   
+   Firebase là lựa chọn tốt cho project này vì:
+   ✅ Authentication tích hợp sẵn
+   ✅ Realtime sync tự động
+   ✅ Lưu trữ dữ liệu lịch sử dễ dàng
+   ✅ SDK đơn giản, ít code hơn MQTT
+   
+   Tuy nhiên:
+   ⚠️ Chi phí có thể cao nếu scale lên (nhiều thiết bị, traffic cao)
+   ⚠️ Phụ thuộc vào dịch vụ của Google
+   ⚠️ Latency có thể cao hơn MQTT trực tiếp (phải qua Firebase server)
+
+========================================
+
+KẾT QUẢ KIỂM TRA MỚI NHẤT (2025-12-15 19:15 - Branch: test):
+✅ Không phát hiện lỗi nghiêm trọng mới
+✅ Các vấn đề đã sửa: firebase-config.js (khởi tạo an toàn), script.js (DOM injection, MQTT check)
+⚠️ Vấn đề còn tồn tại: login.html (thẻ </form> thừa), login-login.js (case trùng lặp)
 
 Tóm tắt:
 - Tổng số tệp kiểm tra: 7 (tệp chính trong thư mục gốc)
-- Vấn đề nghiêm trọng còn tồn: 1 (thẻ `</form>` thừa trong `login.html` — chưa sửa theo yêu cầu)
-- Vấn đề trung bình/nhỏ (nên sửa): 6
-- Gợi ý bảo mật & cải thiện: nhiều mục (xem chi tiết từng file)
+- Vấn đề nghiêm trọng còn tồn: 1 (thẻ `</form>` thừa trong `login.html`)
+- Vấn đề trung bình/nhỏ: 3 (không ảnh hưởng nghiêm trọng)
+- Lỗi cú pháp: Không phát hiện
+- Thêm tính năng mới: WiFi status badge, nút "Làm mới" dữ liệu
 
 Tệp đã kiểm tra: `index.html`, `login.html`, `auth.js`, `firebase-config.js`, `login-login.js`, `script.js`, `style.css`.
 
@@ -143,7 +265,6 @@ Chi tiết theo tệp (tiếng Việt):
     + Button màu xanh dương nổi bật, dễ nhận biết
     + Chiếm toàn bộ chiều rộng nên dễ click hơn
     + Icon chart giúp người dùng hiểu ngay mục đích của button
-
 - CẬP NHẬT 2025-12-15 18:08 (NHÁNH TEST): Sửa lỗi biểu đồ cập nhật khi toggle switches
   - Vấn đề: Mỗi khi nhấn nút "Nguồn Phòng", gạt công tắc "Quạt Gió" hoặc "Đèn Phòng", biểu đồ bị cập nhật và thêm dữ liệu mới, làm chart kéo dài không đúng
   - Nguyên nhân: Hàm `showChart()` có listener `onValue` lắng nghe TẤT CẢ thay đổi trên `devices/${deviceId}`, bao gồm cả thay đổi trạng thái (`active`, `fan_active`, `lamp_active`). Mỗi khi có bất kỳ thay đổi nào, code đều đẩy dữ liệu vào `cachedHistoryData` và update chart, dù dữ liệu sensor (temp, humid, light) không thay đổi
@@ -158,6 +279,14 @@ Chi tiết theo tệp (tiếng Việt):
       ```
     + CHỈ cập nhật chart khi `sensorChanged === true` VÀ dữ liệu sensor hợp lệ (không undefined)
     + Cập nhật `lastSensorData` sau mỗi lần push dữ liệu vào chart
+    + Code mới:
+      ```javascript
+      // ... (code checks sensor changes) ...
+      // Chỉ cần ít nhất 1 sensor có data hợp lệ
+      const hasValidData = data.temp != null || data.humid != null || data.light != null;
+      // ...
+      ```
+    + Lợi ích: Fix lỗi chart không chạy khi light sensor chưa có dữ liệu
   - Code:
     ```javascript
     let lastSensorData = { temp: null, humid: null, light: null };
@@ -220,6 +349,33 @@ Chi tiết theo tệp (tiếng Việt):
     + Sửa: Đổi `${row.lux}` thành `${row.light}` ở dòng 959 để khớp với key của object
     + Giải thích: Object row có structure `{light: val.lux}` nên phải truy cập qua `row.light` chứ không phải `row.lux`
 
+- CẬP NHẬT 2025-12-15 19:27 (NHÁNH TEST): Cải thiện CSS layout cho cards
+  - Vấn đề 1: Card có chiều cao quá lớn với khoảng trống dư thừa bên dưới
+  - Vấn đề 2: 3 thông số (Nhiệt độ, Độ ẩm, Ánh sáng) hiển thị không đồng nhất - lúc label và value cùng hàng, lúc khác hàng
+  - Nguyên nhân:
+    + Card padding quá lớn (20px)
+    + Margins giữa các sections (metrics, card-actions) quá lớn
+    + `.metric-item` không có `flex-direction: column` nên layout phụ thuộc vào độ dài text
+  - Thay đổi chi tiết:
+    + **`.metric-item`**: Thêm flex column layout để label luôn ở trên, value ở dưới:
+      ```css
+      .metric-item { 
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          text-align: center; 
+      }
+      ```
+    + **`.report-card`**: Giảm padding từ 20px → 16px, thêm `max-height: fit-content`
+    + **`.metrics`**: Giảm padding từ 15px → 12px, margin-bottom từ 20px → 12px
+    + **`.card-actions`**: Loại bỏ margin-top (từ 15px → 0)
+  - Lợi ích:
+    + Card gọn gàng hơn, không có khoảng trống dư thừa
+    + 3 thông số hiển thị đồng nhất: label luôn ở trên, số ở dưới (dạng cột)
+    + Layout responsive tốt hơn, không phụ thuộc độ dài text
+    + Cải thiện UX với spacing hợp lý hơn
+
 Khuyến nghị bảo mật & tĩnh tổng quát:
 - Không chèn trực tiếp dữ liệu bên ngoài vào `innerHTML`.
 - Dùng `addEventListener` để đăng ký sự kiện global thay vì gán thuộc tính `window.onclick`.
@@ -239,7 +395,57 @@ Gợi ý hành động tiếp theo (tôi có thể làm giúp):
 
 Đã áp dụng (NHÁNH TEST): sửa `firebase-config.js`, `script.js` (renderGrid, renderReportList, event handling), và `style.css` (.report-card, .report-grid) như mô tả ở trên.
 
+========================================
+CẬP NHẬT: 2025-12-15 19:15 - KIỂM TRA TOÀN BỘ LẠI (NHÁNH TEST)
+========================================
+
+Kết quả quét toàn bộ các file:
+
+1. **LỖI NGHIÊM TRỌNG MỚI PHÁT HIỆN - script.js:**
+
+   Vị trí: Hàm `setupModal()` (khoảng dòng 343-380) và `setupEditModal()` (khoảng dòng 267)
+   
+   Vấn đề:
+   - Hàm `setupModal()` không kiểm tra null trước khi sử dụng modal element:
+     ```javascript
+     function setupModal() {
+         const modal = document.getElementById('add-modal');
+         // THIẾU: if (!modal) return;
+         modal.style.display = 'none';  // <-- Có thể crash nếu modal không tồn tại
+         ...
+     }
+     ```
+   
+   - Hàm `setupEditModal()` có vấn đề tương tự với editModal
+   
+   Tác động:
+   - Nếu element #add-modal hoặc #edit-modal không tồn tại trong DOM, toàn bộ script.js sẽ bị crash với TypeError
+   - Toàn bộ ứng dụng sẽ không hoạt động do script dừng giữa chừng
+   - Đây là lỗi CRITICAL vì setupModal() được gọi khi khởi tạo
+   
+   Khuyến nghị:
+   - Thêm kiểm tra null ngay sau khi query element:
+     ```javascript
+     function setupModal() {
+         const modal = document.getElementById('add-modal');
+         if (!modal) return;  // <-- Thêm dòng này
+         modal.style.display = 'none';
+         ...
+     }
+     ```
+   - Làm tương tự cho setupEditModal()
+
+2. **Các lỗi cũ vẫn còn (độ ưu tiên trung bình):**
+   - login.html: Thẻ </form> thừa
+   - login-login.js: Duplicate case 'auth/user-not-found' trong switch statement
+
+3. **Điểm tích cực:**
+   - Các sửa lỗi trước đã được áp dụng tốt (renderGrid, firebase-config validation, MQTT checks)
+   - Đa số code đã có null checks đầy đủ (grep tìm được 11 instances kiểm tra null)
+   - Tính năng WiFi status và nút Làm Mới hoạt động tốt
+
+Hành động cần làm ngay:
+- FIX LỖI CRITICAL: Thêm null check vào setupModal() và setupEditModal()
+- (Optional) Sửa các lỗi cũ trong login.html và login-login.js
+
 --- Kết thúc báo cáo ---
-
-
-test push
