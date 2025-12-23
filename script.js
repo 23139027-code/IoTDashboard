@@ -9,6 +9,7 @@ let currentChartType = null;     // Loại biểu đồ đang chọn
 let currentReportDeviceId = null; // ID thiết bị đang xem báo cáo
 // Biến lưu dữ liệu lịch sử để vẽ
 let cachedHistoryData = { labels: [], temps: [], humids: [], lights: [] };
+let commandCounter = 0;          // Biến đếm lệnh MQTT
 // 1. Kiểm tra Login ngay lập tức
 requireAuth();
 
@@ -259,8 +260,11 @@ function handleMQTTMessage(message) {
 // Cập nhật dữ liệu từ MQTT lên Firebase (chỉ để lưu trữ)
 async function updateFirebaseFromMQTT(deviceId, payload, messageType) {
     try {
+        // Luôn dùng thời gian từ web thay vì từ ESP32 để đảm bảo chính xác
+        const webTimestamp = Date.now();
+        
         const updates = {
-            last_update: payload.timestamp || Date.now()
+            last_update: webTimestamp
         };
         
         if (messageType === 'data') {
@@ -278,7 +282,7 @@ async function updateFirebaseFromMQTT(deviceId, payload, messageType) {
                     temp: payload.temperature,
                     humid: payload.humidity,
                     lux: payload.light,
-                    last_update: updates.last_update
+                    last_update: webTimestamp
                 };
                 await push(ref(db, `history/${deviceId}`), historyData);
             }
@@ -316,32 +320,40 @@ function sendCommand(deviceId, cmd, val = "") {
 
     const topic = `SmartHome/${deviceId}/command`;
     
+    // Tăng biến đếm lệnh
+    commandCounter++;
+    
     // Tạo payload theo format chung
     const cmdPayload = {
-        id: "cmd_" + Math.floor(Math.random() * 1000).toString().padStart(3, '0'),
-        command: "set_device",
+        id: "cmd_" + commandCounter.toString().padStart(3, '0'),
+        command: "",
         params: {}
     };
     
-    // Map lệnh sang format mới
+    // Map lệnh sang format mới theo MQTT_COMMANDS.md
     if (cmd === 'START') {
-        cmdPayload.params.device = "mode";
-        cmdPayload.params.state = 1;
+        cmdPayload.command = "set_mode";
+        cmdPayload.params.mode = 1;
+        console.log(`[DEBUG] Command START mapped to set_mode with mode=1`);
     } else if (cmd === 'STOP') {
-        cmdPayload.params.device = "mode";
-        cmdPayload.params.state = 0;
+        cmdPayload.command = "set_mode";
+        cmdPayload.params.mode = 0;
+        console.log(`[DEBUG] Command STOP mapped to set_mode with mode=0`);
     } else if (cmd === 'FAN') {
+        cmdPayload.command = "set_device";
         cmdPayload.params.device = "fan";
         cmdPayload.params.state = parseInt(val);
     } else if (cmd === 'LAMP') {
+        cmdPayload.command = "set_device";
         cmdPayload.params.device = "light";
         cmdPayload.params.state = parseInt(val);
     } else if (cmd === 'AC') {
+        cmdPayload.command = "set_device";
         cmdPayload.params.device = "ac";
         cmdPayload.params.state = parseInt(val);
     } else if (cmd === 'INTERVAL') {
-        cmdPayload.params.device = "interval";
-        cmdPayload.params.state = parseInt(val);
+        cmdPayload.command = "set_interval";
+        cmdPayload.params.interval = parseInt(val);
     }
     
     const payload = JSON.stringify(cmdPayload);
@@ -350,7 +362,8 @@ function sendCommand(deviceId, cmd, val = "") {
     
     try {
         mqttClient.send(message);
-        console.log(`MQTT Sent [${topic}]:`, payload);
+        console.log(`✅ MQTT Sent [${topic}]:`, payload);
+        console.log(`📦 Parsed JSON:`, JSON.parse(payload));
         return true;
     } catch (e) {
         console.error("Lỗi gửi MQTT:", e);
@@ -535,6 +548,10 @@ function setupEditModal() {
                         name: newName,
                         interval: newInterval
                     });
+                    
+                    // Gửi lệnh MQTT để thay đổi chu kỳ đo ngay lập tức
+                    sendCommand(currentEditId, 'INTERVAL', newInterval);
+                    
                     alert("Cập nhật thành công!");
                     editModal.style.display = "none";
                 } catch (err) {
@@ -1312,12 +1329,7 @@ window.saveMQTTSettings = function (event) {
 
     const config = {
         host: document.getElementById('cfg-mqtt-host').value.trim(),
-        port: parseInt(document.getElementById('cfg-mqtt-port').value.trim()),
-        path: document.getElementById('cfg-mqtt-path').value.trim(),
-        useSSL: document.getElementById('cfg-mqtt-ssl').value === 'true',
-        username: document.getElementById('cfg-mqtt-username').value.trim(),
-        password: document.getElementById('cfg-mqtt-password').value.trim(),
-        keepalive: parseInt(document.getElementById('cfg-mqtt-keepalive').value.trim()) || 60
+        ip: document.getElementById('cfg-mqtt-ip').value.trim()
     };
 
     // Validate
@@ -1325,232 +1337,265 @@ window.saveMQTTSettings = function (event) {
         alert("Vui lòng nhập MQTT Broker Host!");
         return;
     }
-    if (!config.port || config.port < 1 || config.port > 65535) {
-        alert("Port không hợp lệ! (1-65535)");
+    if (!config.ip) {
+        alert("Vui lòng nhập IP!");
         return;
     }
 
     // Lưu vào localStorage
     localStorage.setItem('mqtt_config', JSON.stringify(config));
 
-    alert("Đã lưu cấu hình MQTT! Trang web sẽ tải lại để áp dụng.");
-    location.reload();
+    alert("Đã lưu cấu hình!");
 };
 
 // 2. Hàm điền dữ liệu MQTT cũ vào form khi mở tab
 function loadSettingsToForm() {
+    // Cập nhật ngày giờ
+    updateDateTime();
+    setInterval(updateDateTime, 1000); // Cập nhật mỗi giây
+    
+    // Load MQTT Host
     const savedString = localStorage.getItem('mqtt_config');
     if (savedString) {
         try {
             const config = JSON.parse(savedString);
-            document.getElementById('cfg-mqtt-host').value = config.host || '6ceea111b6144c71a57b21faa3553fc6.s1.eu.hivemq.cloud';
-            document.getElementById('cfg-mqtt-port').value = config.port || 8884;
-            document.getElementById('cfg-mqtt-path').value = config.path || '/mqtt';
-            document.getElementById('cfg-mqtt-ssl').value = config.useSSL ? 'true' : 'false';
-            document.getElementById('cfg-mqtt-username').value = config.username || '';
-            document.getElementById('cfg-mqtt-password').value = config.password || '';
-            document.getElementById('cfg-mqtt-keepalive').value = config.keepalive || 60;
+            if (config.host) {
+                document.getElementById('display-mqtt-host').textContent = config.host;
+            }
         } catch (e) {
             console.error("Lỗi load cấu hình MQTT:", e);
         }
-    } else {
-        // Load giá trị mặc định HiveMQ Cloud
-        document.getElementById('cfg-mqtt-host').value = '6ceea111b6144c71a57b21faa3553fc6.s1.eu.hivemq.cloud';
-        document.getElementById('cfg-mqtt-port').value = 8884;
-        document.getElementById('cfg-mqtt-path').value = '/mqtt';
-        document.getElementById('cfg-mqtt-ssl').value = 'true';
-        document.getElementById('cfg-mqtt-username').value = 'SmartHome';
-        document.getElementById('cfg-mqtt-password').value = 'SmartHome01';
-        document.getElementById('cfg-mqtt-keepalive').value = 60;
+    }
+    
+    // Load thông tin thiết bị vào bảng
+    loadDeviceInfoTable();
+}
+
+// Hàm cập nhật ngày giờ
+function updateDateTime() {
+    const now = new Date();
+    const days = ['Chủ Nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'];
+    const dayName = days[now.getDay()];
+    const date = now.getDate().toString().padStart(2, '0');
+    const month = (now.getMonth() + 1).toString().padStart(2, '0');
+    const year = now.getFullYear();
+    const hours = now.getHours().toString().padStart(2, '0');
+    const minutes = now.getMinutes().toString().padStart(2, '0');
+    
+    const dateElement = document.getElementById('current-date');
+    const timeElement = document.getElementById('current-time');
+    
+    if (dateElement) {
+        dateElement.textContent = `${dayName}, ${date}/${month}/${year}`;
+    }
+    if (timeElement) {
+        timeElement.textContent = `${hours}:${minutes}`;
     }
 }
 
-// 3. Hàm xóa cấu hình MQTT (Reset)
-window.clearMQTTSettings = function () {
-    if (confirm("Bạn có chắc muốn xóa cấu hình MQTT và dùng lại mặc định?")) {
-        localStorage.removeItem('mqtt_config');
-        alert("Đã xóa cấu hình. Trang sẽ tải lại.");
-        location.reload();
+// Hàm load thông tin thiết bị vào bảng
+async function loadDeviceInfoTable() {
+    const tableBody = document.getElementById('device-info-table');
+    if (!tableBody) return;
+    
+    try {
+        const snapshot = await get(ref(db, 'devices'));
+        
+        if (!snapshot.exists()) {
+            tableBody.innerHTML = `
+                <tr>
+                    <td colspan="3" style="padding: 20px; text-align: center; color: #9ca3af;">
+                        <i class="fa-solid fa-inbox"></i> Chưa có thiết bị nào
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+        
+        const devices = snapshot.val();
+        let html = '';
+        
+        for (const [id, data] of Object.entries(devices)) {
+            const name = data.name || 'Chưa đặt tên';
+            const ip = data.ip || '192.168.1.22'; // IP mặc định
+            
+            html += `
+                <tr style="border-bottom: 1px solid #e5e7eb;">
+                    <td style="padding: 12px; border: 1px solid #e5e7eb;">
+                        <i class="fa-solid fa-door-open" style="color: #3b82f6; margin-right: 8px;"></i>
+                        ${name}
+                    </td>
+                    <td style="padding: 12px; border: 1px solid #e5e7eb; font-family: monospace; color: #6b7280;">
+                        ${id}
+                    </td>
+                    <td style="padding: 12px; border: 1px solid #e5e7eb; font-family: monospace; color: #059669;">
+                        ${ip}
+                    </td>
+                </tr>
+            `;
+        }
+        
+        tableBody.innerHTML = html;
+        
+    } catch (error) {
+        console.error('Error loading device info:', error);
+        tableBody.innerHTML = `
+            <tr>
+                <td colspan="3" style="padding: 20px; text-align: center; color: #ef4444;">
+                    <i class="fa-solid fa-triangle-exclamation"></i> Lỗi tải dữ liệu: ${error.message}
+                </td>
+            </tr>
+        `;
     }
-};
+}
 
-// 4. Hàm test kết nối MQTT
-window.testMQTTConnection = function () {
-    const host = document.getElementById('cfg-mqtt-host').value.trim();
-    const port = document.getElementById('cfg-mqtt-port').value.trim();
-    const path = document.getElementById('cfg-mqtt-path').value.trim();
-    const useSSL = document.getElementById('cfg-mqtt-ssl').value === 'true';
-    const username = document.getElementById('cfg-mqtt-username').value.trim();
-    const password = document.getElementById('cfg-mqtt-password').value.trim();
-
-    if (!host || !port) {
-        alert("Vui lòng nhập đầy đủ Host và Port!");
+// Hàm Reboot tất cả thiết bị
+window.rebootAllDevices = async function() {
+    if (!confirm("⚠️ Bạn có chắc muốn REBOOT tất cả thiết bị ESP32?\n\nThiết bị sẽ khởi động lại và mất kết nối trong vài giây.")) {
         return;
     }
     
-    // Kiểm tra Paho đã load chưa
-    if (typeof Paho === 'undefined') {
-        alert("❌ Lỗi: Thư viện Paho MQTT chưa được load!\n\nVui lòng refresh trang và thử lại.");
+    if (!isMQTTConnected()) {
+        alert("❌ Chưa kết nối MQTT! Không thể gửi lệnh reboot.");
         return;
     }
-
-    const testMessage = "\ud83d\udd0d Đang test kết nối MQTT...\n\nBroker: " + host + ":" + port + "\nPath: " + path + "\nSSL: " + (useSSL ? "Có (wss://)" : "Không (ws://)");
-    if (username) {
-        testMessage += "\nUsername: " + username;
-    }
-    alert(testMessage);
-
+    
     try {
-        const testClientId = "TestClient_" + Math.random().toString(16).substr(2, 8);
-        const testClient = new Paho.MQTT.Client(host, parseInt(port), path, testClientId);
-
-        testClient.onConnectionLost = (obj) => {
-            alert("❌ Test thất bại: Mất kết nối\n\nLỗi: " + obj.errorMessage);
-        };
-
-        const connectOptions = {
-            onSuccess: () => {
-                alert("✅ Kết nối MQTT thành công!\n\nBroker: " + host + ":" + port + "\n\nBạn có thể lưu cấu hình này.");
-                testClient.disconnect();
-            },
-            onFailure: (e) => {
-                let errorMsg = e.errorMessage || "Unknown error";
-                if (e.errorCode === 7) {
-                    errorMsg += "\n\n💡 Gợi ý: Kiểm tra lại username/password nếu broker yêu cầu xác thực.";
-                } else if (e.errorCode === 8) {
-                    errorMsg += "\n\n💡 Gợi ý: Kiểm tra firewall hoặc kết nối mạng.";
-                }
-                alert("❌ Kết nối MQTT thất bại!\n\nLỗi: " + errorMsg + "\n\nVui lòng kiểm tra lại thông tin broker.");
-            },
-            useSSL: useSSL,
-            cleanSession: true,
-            timeout: 10
-        };
-
-        if (username) {
-            connectOptions.userName = username;
-            connectOptions.password = password;
+        const snapshot = await get(ref(db, 'devices'));
+        
+        if (!snapshot.exists()) {
+            alert("Không tìm thấy thiết bị nào!");
+            return;
         }
+        
+        const devices = snapshot.val();
+        let count = 0;
+        
+        // Gửi lệnh reboot cho tất cả thiết bị
+        for (const deviceId of Object.keys(devices)) {
+            const topic = `SmartHome/${deviceId}/command`;
+            commandCounter++;
+            
+            const rebootPayload = {
+                id: "cmd_" + commandCounter.toString().padStart(3, '0'),
+                command: "reboot",
+                params: {}
+            };
+            
+            const payload = JSON.stringify(rebootPayload);
+            const message = new Paho.MQTT.Message(payload);
+            message.destinationName = topic;
+            
+            try {
+                mqttClient.send(message);
+                console.log(`✅ Sent reboot to ${deviceId}`);
+                count++;
+            } catch (e) {
+                console.error(`❌ Failed to send reboot to ${deviceId}:`, e);
+            }
+        }
+        
+        alert(`✅ Đã gửi lệnh REBOOT đến ${count} thiết bị!\n\nCác thiết bị sẽ khởi động lại trong vài giây.`);
+        
+    } catch (error) {
+        console.error('Error rebooting devices:', error);
+        alert("❌ Lỗi khi gửi lệnh reboot: " + error.message);
+    }
+};
 
-        testClient.connect(connectOptions);
-    } catch (e) {
-        alert("❌ Lỗi khởi tạo test MQTT:\n" + e.message);
+// 3. Hàm xóa cấu hình MQTT (Reset)
+window.clearMQTTSettings = function () {
+    if (confirm("Bạn có chắc muốn xóa cấu hình MQTT?")) {
+        localStorage.removeItem('mqtt_config');
+        document.getElementById('cfg-mqtt-host').value = '6ceea111b6144c71a57b21faa3553fc6.s1.eu.hivemq.cloud';
+        document.getElementById('cfg-mqtt-ip').value = '192.168.1.22';
+        alert("Đã reset về giá trị mặc định.");
     }
 };
 
 // ============================================================
 // WIFI SETUP GUIDE - Hiển thị hướng dẫn kết nối WiFi cho ESP32
 // ============================================================
-window.showWiFiSetupGuide = async function() {
-    const instructionsDiv = document.getElementById('wifi-setup-instructions');
+window.showWiFiSetupGuide = function() {
+    const guideDiv = document.getElementById('wifi-guide-content');
     
-    if (!instructionsDiv) {
-        console.error('wifi-setup-instructions div not found');
+    if (!guideDiv) {
+        console.error('wifi-guide-content div not found');
         return;
     }
 
-    // Hiển thị loading
-    instructionsDiv.innerHTML = `
-        <div style="text-align: center; padding: 20px;">
-            <i class="fa-solid fa-spinner fa-spin" style="font-size: 24px; color: #f59e0b;"></i>
-            <p style="margin-top: 10px; color: #78350f;">Đang tải thông tin thiết bị...</p>
-        </div>
-    `;
-    instructionsDiv.style.display = 'block';
+    // Toggle hiển thị/ẩn
+    if (guideDiv.style.display === 'none' || guideDiv.style.display === '') {
+        // IP mặc định cho ESP32 khi ở chế độ AP
+        const espIP = '192.168.4.1';
+        
+        // Hiển thị hướng dẫn
+        guideDiv.innerHTML = `
+            <div style="color: #78350f;">
+                <h4 style="margin: 0 0 15px 0; color: #92400e;">
+                    <i class="fa-solid fa-circle-info"></i> Các bước cấu hình WiFi cho ESP32
+                </h4>
+                
+                <div style="background: #fef9f3; padding: 12px; border-radius: 6px; margin-bottom: 15px; border: 1px solid #fbbf24;">
+                    <strong style="color: #92400e;">Bước 1: Kết nối vào WiFi của ESP32</strong>
+                    <ol style="margin: 10px 0 0 20px; padding: 0;">
+                        <li style="margin: 5px 0;">Mở danh sách WiFi trên điện thoại/máy tính của bạn</li>
+                        <li style="margin: 5px 0;">Tìm và kết nối vào mạng WiFi: <code style="background: white; padding: 2px 6px; border-radius: 3px; color: #c2410c;">ESP32_SmartHome</code></li>
+                        <li style="margin: 5px 0;">Password (nếu có): <code style="background: white; padding: 2px 6px; border-radius: 3px; color: #c2410c;">12345678</code></li>
+                    </ol>
+                </div>
 
-    try {
-        // Lấy danh sách devices từ Firebase
-        const devicesRef = ref(db, 'devices');
-        const snapshot = await get(devicesRef);
-        
-        if (!snapshot.exists()) {
-            instructionsDiv.innerHTML = `
-                <p style="color: #dc2626; margin: 0;">
-                    <i class="fa-solid fa-circle-exclamation"></i> 
-                    Không tìm thấy thiết bị nào. Vui lòng thêm thiết bị trước.
-                </p>
-            `;
-            return;
-        }
-        
-        const devices = snapshot.val();
-        let setupDevices = [];
-        
-        // Tìm devices đang ở Setup Mode
-        for (const [id, data] of Object.entries(devices)) {
-            if (data.setup_mode === true) {
-                setupDevices.push({
-                    id: id,
-                    name: data.name || id,
-                    ap_ssid: data.ap_ssid || `ESP32-Setup-${id}`,
-                    ap_ip: data.ap_ip || '192.168.4.1'
-                });
-            }
-        }
-        
-        if (setupDevices.length === 0) {
-            instructionsDiv.innerHTML = `
-                <div style="padding: 10px;">
-                    <p style="color: #059669; margin: 0 0 10px 0;">
-                        <i class="fa-solid fa-circle-check"></i> 
-                        <strong>Tất cả thiết bị đã kết nối WiFi.</strong>
+                <div style="background: #fef9f3; padding: 12px; border-radius: 6px; margin-bottom: 15px; border: 1px solid #fbbf24;">
+                    <strong style="color: #92400e;">Bước 2: Mở trình duyệt và truy cập</strong>
+                    <p style="margin: 10px 0;">
+                        Sau khi kết nối WiFi ESP32, mở trình duyệt và truy cập vào:
                     </p>
-                    <p style="color: #666; font-size: 0.85rem; margin: 0;">
-                        Nếu bạn muốn đổi WiFi, vui lòng reset ESP32 hoặc xóa WiFi đã lưu trong code.
-                    </p>
-                </div>
-            `;
-        } else {
-            // Hiển thị hướng dẫn cho từng thiết bị
-            let html = '<h5 style="margin: 0 0 15px 0; color: #92400e;"><i class="fa-solid fa-mobile-screen"></i> Thiết bị cần cấu hình WiFi:</h5>';
-            
-            setupDevices.forEach((dev, index) => {
-                html += `
-                    <div style="margin: 15px 0; padding: 15px; background: #fffbeb; border-radius: 6px; border: 1px solid #fbbf24;">
-                        <h6 style="margin: 0 0 10px 0; color: #92400e; font-weight: 600;">
-                            ${index + 1}. ${dev.name} <span style="color: #999; font-weight: normal; font-size: 0.85em;">(${dev.id})</span>
-                        </h6>
-                        <ol style="margin: 5px 0; padding-left: 20px; color: #78350f; font-size: 0.85rem; line-height: 1.8;">
-                            <li>Bật <strong>điện thoại</strong> hoặc <strong>laptop</strong>, vào <strong>Cài đặt WiFi</strong></li>
-                            <li>Tìm và kết nối vào WiFi: 
-                                <br><span style="display: inline-block; margin: 5px 0; padding: 5px 10px; background: #f59e0b; color: white; border-radius: 4px; font-weight: 600;">
-                                    <i class="fa-solid fa-wifi"></i> ${dev.ap_ssid}
-                                </span>
-                                <br><small style="color: #999;">(Không cần mật khẩu)</small>
-                            </li>
-                            <li>Trình duyệt sẽ <strong>tự động mở</strong> trang cấu hình
-                                <br><small style="color: #666;">Nếu không tự mở, hãy truy cập: 
-                                    <code style="background: white; padding: 2px 6px; border-radius: 3px; color: #f59e0b; font-weight: 600;">${dev.ap_ip}</code>
-                                </small>
-                            </li>
-                            <li>Chọn <strong>WiFi gia đình</strong> của bạn trong danh sách hiển thị</li>
-                            <li>Nhập <strong>mật khẩu WiFi</strong> và nhấn nút <strong>"Save"</strong></li>
-                            <li>ESP32 sẽ tự động kết nối và xuất hiện trên Dashboard trong <strong>vài giây</strong> ✅</li>
-                        </ol>
+                    <div style="text-align: center; margin: 10px 0;">
+                        <a href="http://${espIP}" target="_blank" 
+                           style="display: inline-block; padding: 12px 24px; background: #f59e0b; color: white; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 1.1rem;">
+                            <i class="fa-solid fa-external-link-alt"></i> http://${espIP}
+                        </a>
                     </div>
-                `;
-            });
-            
-            html += `
-                <div style="margin-top: 15px; padding: 10px; background: #f0f9ff; border-radius: 6px; border-left: 3px solid #3b82f6;">
-                    <p style="margin: 0; color: #1e40af; font-size: 0.85rem;">
-                        <i class="fa-solid fa-circle-info"></i> 
-                        <strong>Mẹo:</strong> Sau khi cấu hình xong, trang này sẽ tự động cập nhật khi ESP32 kết nối thành công.
+                    <p style="margin: 10px 0; font-size: 0.9rem; color: #92400e;">
+                        <i class="fa-solid fa-lightbulb"></i> Click vào link trên để mở trang cấu hình
                     </p>
                 </div>
-            `;
-            
-            instructionsDiv.innerHTML = html;
-        }
-        
-    } catch (error) {
-        console.error('Error loading WiFi setup guide:', error);
-        instructionsDiv.innerHTML = `
-            <p style="color: #dc2626; margin: 0;">
-                <i class="fa-solid fa-triangle-exclamation"></i> 
-                Lỗi khi tải thông tin: ${error.message}
-            </p>
+
+                <div style="background: #fef9f3; padding: 12px; border-radius: 6px; margin-bottom: 15px; border: 1px solid #fbbf24;">
+                    <strong style="color: #92400e;">Bước 3: Nhập thông tin WiFi nhà bạn</strong>
+                    <ol style="margin: 10px 0 0 20px; padding: 0;">
+                        <li style="margin: 5px 0;">Chọn tên WiFi nhà bạn từ danh sách (hoặc nhập thủ công)</li>
+                        <li style="margin: 5px 0;">Nhập mật khẩu WiFi</li>
+                        <li style="margin: 5px 0;">Click <strong>"Lưu"</strong> hoặc <strong>"Connect"</strong></li>
+                        <li style="margin: 5px 0;">Đợi ESP32 khởi động lại và kết nối vào WiFi nhà bạn</li>
+                    </ol>
+                </div>
+
+                <div style="background: #dcfce7; padding: 12px; border-radius: 6px; border: 1px solid #86efac;">
+                    <strong style="color: #166534;">
+                        <i class="fa-solid fa-check-circle"></i> Sau khi cấu hình xong
+                    </strong>
+                    <p style="margin: 10px 0 0 0; color: #166534;">
+                        ESP32 sẽ tự động kết nối vào WiFi nhà bạn. Sau đó bạn có thể kết nối lại WiFi nhà và sử dụng hệ thống bình thường.
+                    </p>
+                </div>
+
+                <div style="margin-top: 15px; padding: 10px; background: #fee2e2; border-left: 4px solid #ef4444; border-radius: 4px;">
+                    <strong style="color: #991b1b;">
+                        <i class="fa-solid fa-exclamation-triangle"></i> Lưu ý
+                    </strong>
+                    <ul style="margin: 8px 0 0 20px; padding: 0; color: #991b1b;">
+                        <li>Nếu không thấy WiFi "ESP32_SmartHome", hãy reset ESP32 bằng nút RESET trên board</li>
+                        <li>Đảm bảo WiFi nhà bạn hoạt động ở tần số 2.4GHz (ESP32 không hỗ trợ 5GHz)</li>
+                        <li>IP <code>${espIP}</code> chỉ hoạt động khi bạn kết nối vào WiFi của ESP32</li>
+                    </ul>
+                </div>
+            </div>
         `;
+        
+        guideDiv.style.display = 'block';
+    } else {
+        guideDiv.style.display = 'none';
     }
 };
 

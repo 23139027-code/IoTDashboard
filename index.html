@@ -177,125 +177,75 @@
             </div>
         </div>
 
-        <div id="setting-view" style="display: none; max-width: 800px; margin: 0 auto;">
+        <div id="setting-view" style="display: none; max-width: 900px; margin: 0 auto;">
             <div class="card"
                 style="background: white; padding: 30px; border-radius: 15px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
                 <h2 style="margin-bottom: 20px; border-bottom: 1px solid #eee; padding-bottom: 10px;">
                     <i class="fa-solid fa-network-wired"></i> Cấu hình MQTT Broker
                 </h2>
 
-                <p style="color: #666; font-size: 0.9rem; margin-bottom: 20px;">
-                    Cấu hình kết nối MQTT để giao tiếp với ESP32. Sau khi lưu, trang web sẽ tải lại để áp dụng.
-                </p>
-
-                <form id="mqtt-setup-form" onsubmit="saveMQTTSettings(event)">
-                    <div class="form-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-                        <div>
-                            <div class="form-group">
-                                <label><i class="fa-solid fa-server"></i> MQTT Broker Host:</label>
-                                <input type="text" id="cfg-mqtt-host" required placeholder="6ceea111b6144c71a57b21faa3553fc6.s1.eu.hivemq.cloud"
-                                    style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
-                                <small style="color: #888;">Ví dụ: *.hivemq.cloud, broker.emqx.io</small>
-                            </div>
-                            <div class="form-group" style="margin-top: 15px;">
-                                <label><i class="fa-solid fa-plug"></i> WebSocket Port:</label>
-                                <input type="number" id="cfg-mqtt-port" required placeholder="8884"
-                                    style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
-                                <small style="color: #888;">Port WebSocket SSL (8884) hoặc không SSL (8083)</small>
-                            </div>
-                            <div class="form-group" style="margin-top: 15px;">
-                                <label><i class="fa-solid fa-route"></i> WebSocket Path:</label>
-                                <input type="text" id="cfg-mqtt-path" required placeholder="/mqtt"
-                                    style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
-                                <small style="color: #888;">Đường dẫn WebSocket (thường là /mqtt)</small>
-                            </div>
-                            <div class="form-group" style="margin-top: 15px;">
-                                <label><i class="fa-solid fa-shield-halved"></i> Use SSL/TLS:</label>
-                                <select id="cfg-mqtt-ssl" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
-                                    <option value="false">Không (ws://)</option>
-                                    <option value="true">Có (wss://)</option>
-                                </select>
-                            </div>
-                        </div>
-
-                        <div>
-                            <div class="form-group">
-                                <label><i class="fa-solid fa-user"></i> Username (Tùy chọn):</label>
-                                <input type="text" id="cfg-mqtt-username" placeholder="Để trống nếu không cần"
-                                    style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
-                                <small style="color: #888;">Username để xác thực MQTT (nếu broker yêu cầu)</small>
-                            </div>
-                            <div class="form-group" style="margin-top: 15px;">
-                                <label><i class="fa-solid fa-key"></i> Password (Tùy chọn):</label>
-                                <input type="password" id="cfg-mqtt-password" placeholder="Để trống nếu không cần"
-                                    style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
-                                <small style="color: #888;">Password để xác thực MQTT (nếu broker yêu cầu)</small>
-                            </div>
-                            <div class="form-group" style="margin-top: 15px;">
-                                <label><i class="fa-solid fa-clock"></i> Keep Alive (giây):</label>
-                                <input type="number" id="cfg-mqtt-keepalive" placeholder="60"
-                                    style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
-                                <small style="color: #888;">Thời gian duy trì kết nối (mặc định 60s)</small>
-                            </div>
-                            <div class="form-group" style="margin-top: 15px;">
-                                <label><i class="fa-solid fa-info-circle"></i> Lưu ý:</label>
-                                <div style="padding: 10px; background: #f0f9ff; border: 1px solid #bfdbfe; border-radius: 6px; color: #1e40af; font-size: 0.9rem;">
-                                    <i class="fa-solid fa-lightbulb"></i> Hệ thống tự động kết nối lại khi mất kết nối (sau 5 giây)
-                                </div>
-                            </div>
-                        </div>
+                <!-- Hiển thị Thứ, Ngày tháng năm -->
+                <div style="text-align: center; padding: 15px; background: #f0f9ff; border-radius: 8px; margin-bottom: 15px;">
+                    <div id="current-date" style="font-size: 1.2rem; font-weight: 600; color: #1e40af; margin-bottom: 8px;">
+                        <!-- JavaScript sẽ cập nhật -->
                     </div>
-
-                    <div style="margin-top: 25px; padding: 15px; background: #f0f9ff; border-left: 4px solid #3b82f6; border-radius: 6px;">
-                        <h4 style="margin: 0 0 10px 0; color: #1e40af;"><i class="fa-solid fa-lightbulb"></i> Thông tin Topic MQTT</h4>
-                        <p style="margin: 5px 0; color: #1e3a8a; font-size: 0.9rem;">
-                            <strong>Gửi lệnh đến ESP32:</strong> <code>SmartHome/{deviceId}/command</code>
-                        </p>
-                        <p style="margin: 5px 0; color: #1e3a8a; font-size: 0.9rem;">
-                            <strong>Nhận dữ liệu từ ESP32:</strong> <code>SmartHome/{deviceId}/data</code>
-                        </p>
-                        <p style="margin: 5px 0; color: #1e3a8a; font-size: 0.9rem;">
-                            <strong>Nhận trạng thái:</strong> <code>SmartHome/{deviceId}/state</code>
-                        </p>
-                        <p style="margin: 5px 0; color: #1e3a8a; font-size: 0.9rem;">
-                            <strong>Nhận thông tin:</strong> <code>SmartHome/{deviceId}/info</code>
-                        </p>
-                        <p style="margin: 10px 0 5px 0; color: #64748b; font-size: 0.85rem; font-style: italic;">
-                            Xem file ESP32_MQTT_GUIDE.md để biết cách cấu hình ESP32
-                        </p>
+                    <div id="current-time" style="font-size: 2rem; font-weight: 700; color: #3b82f6;">
+                        <!-- JavaScript sẽ cập nhật -->
                     </div>
+                </div>
 
-                    <div style="margin-top: 20px; padding: 15px; background: #fef3c7; border-left: 4px solid #f59e0b; border-radius: 6px;">
-                        <h4 style="margin: 0 0 10px 0; color: #92400e;"><i class="fa-solid fa-wifi"></i> Cấu hình WiFi cho ESP32 lần đầu</h4>
-                        <p style="margin: 5px 0; color: #78350f; font-size: 0.9rem;">
-                            Nếu ESP32 chưa kết nối WiFi, bạn cần cấu hình WiFi trước khi sử dụng hệ thống.
-                        </p>
-                        <p style="margin: 10px 0;">
-                            <button type="button" onclick="showWiFiSetupGuide()" 
-                               style="display: inline-flex; align-items: center; gap: 8px; padding: 10px 20px; background: #f59e0b; color: white; text-decoration: none; border: none; border-radius: 6px; font-weight: 500; cursor: pointer; transition: background 0.3s;">
-                                <i class="fa-solid fa-book-open"></i> Hướng dẫn kết nối WiFi ESP32
-                            </button>
-                        </p>
-                        <div id="wifi-setup-instructions" style="display: none; margin-top: 15px; padding: 15px; background: white; border-radius: 6px; border: 1px solid #fbbf24;">
-                            <!-- Dynamic instructions will be inserted here -->
-                        </div>
+                <!-- Hiển thị MQTT Broker Host -->
+                <div style="text-align: center; padding: 12px; background: #f9fafb; border-radius: 8px; margin-bottom: 20px; border: 1px solid #e5e7eb;">
+                    <div style="font-size: 0.9rem; color: #6b7280; margin-bottom: 4px;">
+                        <i class="fa-solid fa-server"></i> MQTT Broker Host
                     </div>
+                    <div id="display-mqtt-host" style="font-size: 1rem; font-weight: 600; color: #111827; font-family: monospace;">
+                        6ceea111b6144c71a57b21faa3553fc6.s1.eu.hivemq.cloud
+                    </div>
+                </div>
 
-                    <div class="actions" style="margin-top: 30px; display: flex; gap: 15px;">
-                        <button type="submit" class="btn-primary"
-                            style="padding: 12px 25px; cursor: pointer; background: var(--primary-color); color: white; border: none; border-radius: 6px;">
-                            <i class="fa-solid fa-save"></i> Lưu Cấu Hình & Khởi Động Lại
-                        </button>
-                        <button type="button" onclick="clearMQTTSettings()"
-                            style="padding: 12px 25px; cursor: pointer; background: #ef4444; color: white; border: none; border-radius: 6px;">
-                            <i class="fa-solid fa-trash"></i> Xóa & Dùng Mặc Định
-                        </button>
-                        <button type="button" onclick="testMQTTConnection()"
-                            style="padding: 12px 25px; cursor: pointer; background: #10b981; color: white; border: none; border-radius: 6px;">
-                            <i class="fa-solid fa-check-circle"></i> Test Kết Nối
-                        </button>
-                    </div>
-                </form>
+                <!-- Bảng hiển thị thông tin thiết bị -->
+                <div style="overflow-x: auto; margin-bottom: 20px;">
+                    <table style="width: 100%; border-collapse: collapse; border: 1px solid #e5e7eb;">
+                        <thead>
+                            <tr style="background: #f3f4f6;">
+                                <th style="padding: 12px; text-align: left; border: 1px solid #e5e7eb; font-weight: 600; color: #374151;">
+                                    <i class="fa-solid fa-door-open"></i> Tên Phòng
+                                </th>
+                                <th style="padding: 12px; text-align: left; border: 1px solid #e5e7eb; font-weight: 600; color: #374151;">
+                                    <i class="fa-solid fa-hashtag"></i> ID
+                                </th>
+                                <th style="padding: 12px; text-align: left; border: 1px solid #e5e7eb; font-weight: 600; color: #374151;">
+                                    <i class="fa-solid fa-network-wired"></i> IP
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody id="device-info-table">
+                            <tr>
+                                <td colspan="3" style="padding: 20px; text-align: center; color: #9ca3af;">
+                                    <i class="fa-solid fa-spinner fa-spin"></i> Đang tải thông tin thiết bị...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- 2 nút: Reboot và WiFi -->
+                <div style="display: flex; gap: 15px; justify-content: center;">
+                    <button type="button" onclick="rebootAllDevices()" 
+                        style="flex: 1; max-width: 250px; padding: 15px 25px; background: #ef4444; color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; transition: background 0.3s; display: flex; align-items: center; justify-content: center; gap: 10px;">
+                        <i class="fa-solid fa-power-off"></i> Reboot Tất Cả
+                    </button>
+                    <button type="button" onclick="showWiFiSetupGuide()" 
+                        style="flex: 1; max-width: 250px; padding: 15px 25px; background: #f59e0b; color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; transition: background 0.3s; display: flex; align-items: center; justify-content: center; gap: 10px;">
+                        <i class="fa-solid fa-wifi"></i> Hướng Dẫn WiFi
+                    </button>
+                </div>
+
+                <!-- Container hiển thị hướng dẫn WiFi -->
+                <div id="wifi-guide-content" style="display: none; margin-top: 20px; padding: 20px; background: #fef3c7; border-radius: 8px; border: 2px solid #f59e0b;">
+                    <!-- Nội dung hướng dẫn sẽ được thêm bằng JavaScript -->
+                </div>
             </div>
         </div>
 
