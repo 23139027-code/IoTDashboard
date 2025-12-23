@@ -260,11 +260,20 @@ function handleMQTTMessage(message) {
 // Cập nhật dữ liệu từ MQTT lên Firebase (chỉ để lưu trữ)
 async function updateFirebaseFromMQTT(deviceId, payload, messageType) {
     try {
-        // Luôn dùng thời gian từ web thay vì từ ESP32 để đảm bảo chính xác
-        const webTimestamp = Date.now();
+        // Ưu tiên dùng timestamp từ ESP32, nếu không có thì dùng thời gian web
+        // Timestamp từ ESP32 sẽ chính xác sau khi đồng bộ
+        let timestamp;
+        if (payload.timestamp) {
+            // ESP32 gửi timestamp (Unix timestamp tính bằng giây)
+            // Chuyển sang milliseconds để phù hợp với JavaScript Date
+            timestamp = payload.timestamp * 1000;
+        } else {
+            // Fallback: dùng thời gian web nếu ESP không gửi timestamp
+            timestamp = Date.now();
+        }
         
         const updates = {
-            last_update: webTimestamp
+            last_update: timestamp
         };
         
         if (messageType === 'data') {
@@ -282,7 +291,7 @@ async function updateFirebaseFromMQTT(deviceId, payload, messageType) {
                     temp: payload.temperature,
                     humid: payload.humidity,
                     lux: payload.light,
-                    last_update: webTimestamp
+                    last_update: timestamp
                 };
                 await push(ref(db, `history/${deviceId}`), historyData);
             }
@@ -1500,6 +1509,70 @@ window.rebootAllDevices = async function() {
     } catch (error) {
         console.error('Error rebooting devices:', error);
         alert("❌ Lỗi khi gửi lệnh reboot: " + error.message);
+    }
+};
+
+// Hàm đồng bộ thời gian cho tất cả thiết bị
+window.syncTimeToAllDevices = async function() {
+    if (!confirm("🕒 Bạn có chắc muốn cập nhật thời gian cho tất cả thiết bị?\n\nThời gian hiện tại của web sẽ được gửi đến ESP32.")) {
+        return;
+    }
+    
+    if (!isMQTTConnected()) {
+        alert("❌ Chưa kết nối MQTT! Không thể gửi lệnh.");
+        return;
+    }
+    
+    try {
+        const snapshot = await get(ref(db, 'devices'));
+        
+        if (!snapshot.exists()) {
+            alert("Không tìm thấy thiết bị nào!");
+            return;
+        }
+        
+        const devices = snapshot.val();
+        let count = 0;
+        let deviceList = [];
+        
+        // Lấy timestamp hiện tại (Unix timestamp tính bằng giây)
+        const currentTimestamp = Math.floor(Date.now() / 1000);
+        
+        console.log(`📡 Sending timestamp ${currentTimestamp} to ${Object.keys(devices).length} devices...`);
+        
+        // Gửi lệnh set_timestamp cho tất cả thiết bị
+        for (const deviceId of Object.keys(devices)) {
+            const topic = `SmartHome/${deviceId}/command`;
+            commandCounter++;
+            
+            const timePayload = {
+                id: "cmd_" + commandCounter.toString().padStart(3, '0'),
+                command: "set_timestamp",
+                params: {
+                    timestamp: currentTimestamp
+                }
+            };
+            
+            const payload = JSON.stringify(timePayload);
+            const message = new Paho.MQTT.Message(payload);
+            message.destinationName = topic;
+            
+            try {
+                mqttClient.send(message);
+                console.log(`✅ Sent timestamp to [${topic}]:`, payload);
+                deviceList.push(deviceId);
+                count++;
+            } catch (e) {
+                console.error(`❌ Failed to send timestamp to ${deviceId}:`, e);
+            }
+        }
+        
+        const currentTime = new Date().toLocaleString('vi-VN');
+        alert(`✅ Đã gửi thời gian đến ${count} thiết bị!\n\nThiết bị: ${deviceList.join(', ')}\n\nThời gian: ${currentTime}\nTimestamp: ${currentTimestamp}\n\n⚠️ Lưu ý: ESP32 cần đang online và subscribe topic command để nhận được lệnh.`);
+        
+    } catch (error) {
+        console.error('Error syncing time:', error);
+        alert("❌ Lỗi khi gửi lệnh đồng bộ thời gian: " + error.message);
     }
 };
 
