@@ -146,7 +146,7 @@ function connectMQTT() {
                 console.error("MQTT Kết nối thất bại:", e);
                 console.error("Error code:", e.errorCode);
                 console.error("Error message:", e.errorMessage);
-                updateStatus('mqtt-status', 'error', `MQTT: Failed (${e.errorMessage || 'Unknown error'})`);
+                updateStatus('mqtt-status', 'error', 'MQTT: Failed');
                 
                 // Tự động thử kết nối lại sau 5 giây
                 setTimeout(() => {
@@ -316,32 +316,32 @@ function sendCommand(deviceId, cmd, val = "") {
 
     const topic = `SmartHome/${deviceId}/command`;
     
-    // Tạo payload theo format mới với cmd_id
+    // Tạo payload theo format chung
     const cmdPayload = {
-        cmd_id: "web_" + Date.now(),
-        command: cmd.toLowerCase(),
+        id: "cmd_" + Math.floor(Math.random() * 1000).toString().padStart(3, '0'),
+        command: "set_device",
         params: {}
     };
     
     // Map lệnh sang format mới
     if (cmd === 'START') {
-        cmdPayload.command = 'set_mode';
-        cmdPayload.params.mode = 1;
+        cmdPayload.params.device = "mode";
+        cmdPayload.params.state = 1;
     } else if (cmd === 'STOP') {
-        cmdPayload.command = 'set_mode';
-        cmdPayload.params.mode = 0;
+        cmdPayload.params.device = "mode";
+        cmdPayload.params.state = 0;
     } else if (cmd === 'FAN') {
-        cmdPayload.command = 'set_fan';
-        cmdPayload.params.fan = parseInt(val);
+        cmdPayload.params.device = "fan";
+        cmdPayload.params.state = parseInt(val);
     } else if (cmd === 'LAMP') {
-        cmdPayload.command = 'set_light';
-        cmdPayload.params.light = parseInt(val);
+        cmdPayload.params.device = "light";
+        cmdPayload.params.state = parseInt(val);
     } else if (cmd === 'AC') {
-        cmdPayload.command = 'set_ac';
-        cmdPayload.params.ac = parseInt(val);
+        cmdPayload.params.device = "ac";
+        cmdPayload.params.state = parseInt(val);
     } else if (cmd === 'INTERVAL') {
-        cmdPayload.command = 'set_interval';
-        cmdPayload.params.interval = parseInt(val);
+        cmdPayload.params.device = "interval";
+        cmdPayload.params.state = parseInt(val);
     }
     
     const payload = JSON.stringify(cmdPayload);
@@ -423,11 +423,12 @@ function renderGrid(data) {
         idSpan.textContent = deviceId;
         headerLeft.appendChild(titleDiv);
         headerLeft.appendChild(idSpan);
-        const chipIcon = document.createElement('i');
-        chipIcon.className = 'fa-solid fa-microchip';
-        chipIcon.style.color = '#6b7280';
+        const wifiSpan = document.createElement('span');
+        wifiSpan.style.fontSize = '0.85rem';
+        wifiSpan.style.color = '#6b7280';
+        wifiSpan.innerHTML = '<i class="fa-solid fa-wifi" style="margin-right: 4px;"></i>' + (device.wifi_ssid || 'Chưa kết nối');
         header.appendChild(headerLeft);
-        header.appendChild(chipIcon);
+        header.appendChild(wifiSpan);
 
         // Status row
         const statusRow = document.createElement('div');
@@ -841,11 +842,12 @@ function renderReportList() {
                 idSpan.textContent = deviceId;
                 headerLeft.appendChild(titleDiv);
                 headerLeft.appendChild(idSpan);
-                const chipIcon = document.createElement('i');
-                chipIcon.className = 'fa-solid fa-microchip';
-                chipIcon.style.color = '#6b7280';
+                const wifiSpan = document.createElement('span');
+                wifiSpan.style.fontSize = '0.85rem';
+                wifiSpan.style.color = '#6b7280';
+                wifiSpan.innerHTML = '<i class="fa-solid fa-wifi" style="margin-right: 4px;"></i>' + (device.wifi_ssid || 'Chưa kết nối');
                 header.appendChild(headerLeft);
-                header.appendChild(chipIcon);
+                header.appendChild(wifiSpan);
 
                 // Status row
                 const statusRow = document.createElement('div');
